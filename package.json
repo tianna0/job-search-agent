@@ -1,0 +1,32 @@
+{
+  "name": "job-tracker-agent",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "local": "node --env-file=.env --import tsx src/node/server.ts",
+    "test": "node --import tsx --test test/core.test.ts test/classify.test.ts test/discover.test.ts test/sources.test.ts test/agent.test.ts test/demo.test.ts test/alerts.test.ts",
+    "check-companies": "node --import tsx src/node/check-companies.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:demo": "wrangler deploy -c wrangler.demo.jsonc",
+    "push-demo": "node --env-file=.env --import tsx src/node/push-demo.ts",
+    "alerts": "node --env-file=.env --import tsx src/node/alerts.ts",
+    "alerts:install": "node --env-file=.env --import tsx src/node/schedule.ts install",
+    "alerts:uninstall": "node --env-file=.env --import tsx src/node/schedule.ts uninstall"
+  },
+  "dependencies": {
+    "agents": "latest",
+    "unpdf": "latest",
+    "nodemailer": "^6.9.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "@types/node": "^22.0.0",
+    "tsx": "latest",
+    "typescript": "^5.6.0",
+    "wrangler": "latest",
+    "@types/nodemailer": "^6.4.0"
+  }
+}

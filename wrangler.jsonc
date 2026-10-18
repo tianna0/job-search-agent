@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "job-tracker-agent",
+  "main": "src/cloudflare/worker.ts",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "ai": { "binding": "AI" },
+  "assets": { "directory": "./public" },
+  "durable_objects": {
+    "bindings": [{ "name": "JobTracker", "class_name": "JobTracker" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["JobTracker"] }],
+
+  // Drafts follow-up emails for stale applications, one durable step per application.
+  // (Job scanning runs in the local version; it needs more CPU than the free plan allows.)
+  "workflows": [
+    { "name": "follow-ups", "binding": "FOLLOWUPS", "class_name": "FollowUpWorkflow" }
+  ],
+
+  // Daily at 13:00 UTC (8:00 Central in summer, 7:00 in winter).
+  "triggers": { "crons": ["0 13 * * *"] },
+
+  // Cloudflare Access. Leave both empty and the app is public.
+  // Fill both in after enabling Access (see README, "Lock it down").
+  "vars": {
+    "TEAM_DOMAIN": "",
+    "POLICY_AUD": ""
+  },
+
+  "observability": { "enabled": true }
+}

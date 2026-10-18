@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Tracker Agent</title>
+<style>
+  :root { --bg:#fafaf9; --fg:#1c1917; --muted:#78716c; --card:#fff; --line:#e7e5e4; --accent:#ea580c; --good:#15803d; --warn:#b45309; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1c1917; --fg:#fafaf9; --muted:#a8a29e; --card:#292524; --line:#44403c; --accent:#fb923c; --good:#4ade80; --warn:#fbbf24; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,sans-serif; }
+  main { max-width:960px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  h2 { font-size:16px; margin:0 0 12px; }
+  p.sub { color:var(--muted); margin:0 0 24px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  input, select { width:100%; font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px; }
+  button { font:inherit; background:var(--accent); color:#fff; border:0; border-radius:6px; padding:8px 14px; cursor:pointer; margin-top:8px; }
+  button.small { padding:4px 10px; margin-top:0; font-size:13px; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .app, .job { border-top:1px solid var(--line); padding:12px 0; }
+  .app:first-child, .job:first-child { border-top:0; }
+  .head { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; }
+  .score { font-weight:600; color:var(--accent); margin-right:8px; }
+  .tags { margin:6px 0; color:var(--muted); font-size:13px; }
+  .note { color:var(--muted); font-size:13px; margin-top:6px; }
+  .badge { display:inline-block; font-size:12px; border:1px solid var(--line); border-radius:999px; padding:0 8px; margin-right:6px; color:var(--muted); }
+  .badge.entry { color:var(--good); border-color:var(--good); }
+  .badge.maybe { color:var(--warn); border-color:var(--warn); }
+  .badge.new { color:var(--accent); border-color:var(--accent); }
+  details summary { cursor:pointer; color:var(--accent); }
+  pre { white-space:pre-wrap; font:inherit; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:10px; }
+  a { color:var(--accent); }
+  .err { color:#dc2626; margin-top:8px; white-space:pre-wrap; }
+  .busy { color:var(--muted); margin-top:8px; }
+  select.status { width:auto; }
+  .filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:12px 0 4px; }
+  .joblist { margin-top:8px; }
+  .chatlog { max-height:340px; overflow:auto; display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }
+  .msg { padding:8px 12px; border-radius:10px; max-width:85%; white-space:pre-wrap; word-wrap:break-word; }
+  .msg.user { align-self:flex-end; background:var(--accent); color:#fff; }
+  .msg.assistant { align-self:flex-start; background:var(--bg); border:1px solid var(--line); }
+  .chatform { display:flex; gap:8px; }
+  .chatform button { margin-top:0; }
+  details.fails summary { color:var(--muted); font-size:13px; }
+  .demo { background:var(--card); border:1px solid var(--accent); border-radius:10px; padding:12px 16px; margin:12px 0 16px; font-size:14px; }
+  .demo button { margin:8px 0 0; }
+  a.bm { display:inline-block; background:var(--accent); color:#fff; text-decoration:none; border-radius:6px; padding:6px 12px; font-weight:600; cursor:grab; margin:4px 0 6px; }
+  #unreadable ul { margin:4px 0 0; padding-left:18px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Job Tracker Agent</h1>
+  <div id="demoBanner" class="demo" hidden>
+    <strong>Public demo.</strong> This is your own private copy, filled with a <em>fictional</em> sample resume and a sample application.
+    The job list is a real snapshot from a scan <span id="demoSnapshot"></span> (scanning runs in the local version of the app).
+    Try the chat, "Add to tracker" on a job, or "Draft follow-ups now". Please don't upload a real resume.
+    <span id="demoLimit"></span>
+    <button id="demoReset" class="small">Reset demo</button>
+  </div>
+  <p class="sub">Upload your resume, find entry-level software jobs across top companies or paste a single job link, and track where each application stands.</p>
+
+  <section>
+    <h2>1. Your resume</h2>
+    <input id="resumeFile" type="file" accept="application/pdf,.pdf">
+    <div id="resumeInfo" class="note">No resume uploaded yet.</div>
+    <div class="note">PDF only, up to 5 MB. Text-based PDFs work best; scanned images are not supported.</div>
+  </section>
+
+  <section>
+    <h2>2. Ask the assistant</h2>
+    <div id="chatLog" class="chatlog"></div>
+    <form id="chatForm" class="chatform">
+      <input id="chatInput" placeholder="e.g. Any new entry-level backend jobs? · Add the Stripe one · I applied to Reddit" autocomplete="off">
+      <button id="chatSend" type="submit">Send</button>
+    </form>
+    <div id="chatBusy" class="busy"></div>
+    <div id="chatErr" class="err"></div>
+    <div class="note">It can list and filter found jobs, add a job to your tracker, update statuses, revise cover letters, and start a scan. <a href="#" id="chatReset">Clear chat</a></div>
+  </section>
+
+  <section>
+    <h2>3. Find jobs</h2>
+    <button id="scanNow">Scan all companies now</button>
+    <span id="scanNote" class="note">Also runs automatically once a day (after 8:00) while the local app is running.</span>
+    <div id="scanStatus" class="busy"></div>
+    <div id="discoverErr" class="err"></div>
+    <div id="unreadable" class="note"></div>
+    <div class="filters">
+      <select id="fLevel"><option value="">Entry + Maybe</option><option value="entry">Entry only</option><option value="maybe">Maybe only</option></select>
+      <select id="fCategory"><option value="">All role types</option></select>
+      <select id="fCompany"><option value="">All companies</option></select>
+      <input id="fText" placeholder="Filter by title or location">
+    </div>
+    <div id="jobCount" class="note"></div>
+    <div id="jobs" class="joblist"></div>
+  </section>
+
+  <section>
+    <h2>4. Add a single job</h2>
+    <p class="note" style="margin-top:0">
+      <strong>From any site, with one click</strong> (works for Google, Meta, Uber, LinkedIn and pages that need a login):
+      drag this button to your bookmarks bar, then click it while you're on a job's page.
+    </p>
+    <a id="bookmarklet" class="bm" href="#">+ Send to Job Tracker</a>
+    <div class="note">The page text is read in your own browser and sent only to this app. Keep this app running while you use it. If nothing opens, allow pop-ups for that site.</div>
+
+    <p class="note" style="margin-top:16px"><strong>Or paste a link</strong> (works when the page doesn't need a login):</p>
+    <input id="jobUrl" type="url" placeholder="https://company.com/careers/job-posting">
+    <button id="apply">Analyze job</button>
+    <div id="busy" class="busy"></div>
+    <div id="err" class="err"></div>
+  </section>
+
+  <section>
+    <h2>5. My applications</h2>
+    <button id="followUps" class="small">Draft follow-ups now</button>
+    <span id="followUpNote" class="note"></span>
+    <div id="followUpErr" class="err"></div>
+    <div id="apps"></div>
+  </section>
+</main>
+
+<script>
+let BASE = "/agents/job-tracker/default";
+// crypto.randomUUID needs https; fall back to getRandomValues elsewhere.
+function newUuid() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+
+/** Demo visitors get their own copy, addressed by a random id kept in this browser. */
+function visitorId() {
+  let id = null;
+  try { id = localStorage.getItem("jt-visitor"); } catch {}
+  if (!id || !/^v-[0-9a-f-]{36}$/.test(id)) {
+    id = "v-" + newUuid();
+    try { localStorage.setItem("jt-visitor", id); } catch {}
+  }
+  return id;
+}
+const STATUSES = ["saved","applied","interviewing","offer","rejected"];
+const CATEGORIES = ["SWE","SDE","Backend","Frontend","Full-stack","QA/SDET"];
+const $ = (id) => document.getElementById(id);
+let state = { resumeName: "", resume: "", applications: [], discovered: [], lastDiscovery: {}, scan: null, chat: [] };
+let companies = [];
+let info = { canScan: true, followUpAfterDays: 14, demo: false, aiDailyLimit: null };
+// "New" = first seen during the latest scan.
+const isNew = (j) => !!state.scan && Date.parse(j.firstSeen) >= Date.parse(state.scan.startedAt);
+let pollTimer = null;
+let tracking = new Set(); // job ids being analyzed right now
+
+async function api(route, init) {
+  const res = await fetch(`${BASE}/${route}`, init);
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+const postJson = (route, body) =>
+  api(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+function safeHref(url) {
+  try { const u = new URL(url); return u.protocol === "https:" || u.protocol === "http:" ? u.href : "#"; }
+  catch { return "#"; }
+}
+
+const waitingDays = (a) => a.status === "applied" ? Math.floor((Date.now() - Date.parse(a.updatedAt)) / 86400000) : 0;
+
+function renderApps() {
+  $("resumeInfo").textContent = state.resume
+    ? `Current resume: ${state.resumeName} (${state.resume.length.toLocaleString()} characters read)`
+    : "No resume uploaded yet.";
+  $("apps").innerHTML = state.applications.length ? state.applications.map((a) => `
+    <div class="app">
+      <div class="head">
+        <strong>${esc(a.company)} · ${esc(a.title)}</strong>
+        <span>${waitingDays(a) >= info.followUpAfterDays ? `<span class="badge maybe">No reply in ${waitingDays(a)} days</span>` : ""}${a.sample ? '<span class="badge">Sample</span>' : ""}<span class="score">Fit ${a.fitScore}</span>
+          <select class="status" data-id="${esc(a.id)}">${STATUSES.map((s) =>
+            `<option ${s === a.status ? "selected" : ""}>${s}</option>`).join("")}</select></span>
+      </div>
+      <div class="tags">Strengths: ${a.strengths.map(esc).join("; ") || "—"}<br>Gaps: ${a.gaps.map(esc).join("; ") || "—"}</div>
+      <div class="note"><a href="${esc(safeHref(a.url))}" target="_blank" rel="noopener noreferrer">View job posting</a></div>
+      <details><summary>Cover letter draft</summary><pre>${esc(a.coverLetter)}</pre></details>
+      ${a.followUp ? `<details><summary>Follow-up email draft (${esc(new Date(a.followUp.draftedAt).toLocaleDateString())})</summary><pre>${esc(a.followUp.text)}</pre></details>` : ""}
+    </div>`).join("") : '<p class="sub">No applications yet.</p>';
+  const f = state.followUps;
+  $("followUpNote").textContent =
+    `Drafts a short follow-up email for applications in "applied" with no change for ${info.followUpAfterDays}+ days. Runs daily.` +
+    (f ? ` Last run ${new Date(f.lastRunAt).toLocaleString()}: ${f.drafted} drafted.` : "");
+}
+
+function filteredJobs() {
+  const level = $("fLevel").value, cat = $("fCategory").value, co = $("fCompany").value;
+  const q = $("fText").value.trim().toLowerCase();
+  return state.discovered
+    .filter((j) => (!level || j.level === level) && (!cat || j.category === cat) && (!co || j.company === co))
+    .filter((j) => !q || `${j.title} ${j.location} ${j.companyName}`.toLowerCase().includes(q))
+    .sort((a, b) =>
+      (a.level === b.level ? 0 : a.level === "entry" ? -1 : 1) ||
+      (isNew(b) - isNew(a)) ||
+      a.companyName.localeCompare(b.companyName) || a.title.localeCompare(b.title));
+}
+
+function renderJobs() {
+  const list = filteredJobs();
+  const have = new Set(state.applications.map((a) => a.url));
+  const lastRun = Object.values(state.lastDiscovery).sort().pop();
+  $("jobCount").textContent = state.discovered.length
+    ? `${list.length} of ${state.discovered.length} jobs shown` +
+      (lastRun ? ` · last run ${new Date(lastRun).toLocaleString()}` : "")
+    : "No results yet. Click the button above to scan the companies.";
+  $("jobs").innerHTML = list.map((j) => `
+    <div class="job">
+      <div class="head">
+        <strong>${esc(j.companyName)} · ${esc(j.title)}</strong>
+        <span>${have.has(j.url)
+          ? '<span class="badge">In tracker</span>'
+          : `<button class="small" data-track="${esc(j.id)}" ${tracking.has(j.id) ? "disabled" : ""}>${tracking.has(j.id) ? "Analyzing…" : "Add to tracker"}</button>`}</span>
+      </div>
+      <div class="tags">
+        ${isNew(j) ? '<span class="badge new">New</span>' : ""}
+        <span class="badge ${j.level}">${j.level === "entry" ? "Entry" : "Maybe"}</span>
+        <span class="badge">${esc(j.category)}</span>
+        ${esc(j.location || "Location not listed")} ·
+        <a href="${esc(safeHref(j.url))}" target="_blank" rel="noopener noreferrer">Posting</a>
+        <br>Why: ${j.reasons.map(esc).join("; ") || "—"}
+      </div>
+    </div>`).join("");
+}
+
+function renderScan() {
+  const s = state.scan;
+  const running = s && !s.finishedAt;
+  $("scanNow").disabled = !!running || !info.canScan;
+  if (!info.canScan) {
+    $("scanNote").textContent = "Scanning runs in the local version of the app (npm run local): it needs more CPU than Cloudflare's free plan allows.";
+  }
+  if (!s) { $("scanStatus").textContent = ""; return; }
+  const name = (id) => (companies.find((c) => c.id === id) || {}).name || id;
+  const when = new Date(s.finishedAt || s.startedAt).toLocaleString();
+  const fails = s.failed.length
+    ? ` <details class="fails"><summary>${s.failed.length} couldn't be read</summary>${s.failed.map((f) => `${esc(name(f.company))}: ${esc(f.error)}`).join("<br>")}</details>`
+    : "";
+  $("scanStatus").innerHTML = running
+    ? `Scanning… ${s.done.length}/${s.companies.length} companies done, ${s.matched} matching jobs so far (${s.newJobs} new).` +
+      (s.done.length < s.companies.length ? ` Next: ${esc(name(s.companies.find((c) => !s.done.includes(c))))}.` : "") + fails
+    : `Last scan (${s.trigger === "cron" ? "daily" : "manual"}) finished ${esc(when)}: ${s.matched} matching jobs, ${s.newJobs} new.` + fails;
+}
+
+function renderChat() {
+  $("chatLog").innerHTML = state.chat.length
+    ? state.chat.map((m) => `<div class="msg ${m.role}">${esc(m.text)}</div>`).join("")
+    : '<div class="note">Ask about your jobs and applications.</div>';
+  $("chatLog").scrollTop = $("chatLog").scrollHeight;
+}
+
+function renderDemo() {
+  if (!info.demo) return;
+  $("demoBanner").hidden = false;
+  const last = Object.values(state.lastDiscovery || {}).sort().pop();
+  $("demoSnapshot").textContent = last ? `on ${new Date(last).toLocaleDateString()}` : "(none pushed yet)";
+  $("demoLimit").textContent = info.aiDailyLimit ? `Each visitor gets ${info.aiDailyLimit} AI calls per day.` : "";
+}
+
+function render() { renderApps(); renderJobs(); renderScan(); renderChat(); renderDemo(); }
+
+// While a scan runs, refresh every few seconds.
+function watchScan() {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    try { state = await api("state"); renderJobs(); renderScan(); renderApps(); } catch {}
+    if (!state.scan || state.scan.finishedAt) { clearInterval(pollTimer); pollTimer = null; }
+  }, 4000);
+}
+
+function fillFilters() {
+  $("fCategory").innerHTML = '<option value="">All role types</option>' +
+    CATEGORIES.map((c) => `<option>${c}</option>`).join("");
+  $("fCompany").innerHTML = '<option value="">All companies</option>' +
+    companies.filter((c) => c.readable).map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+  const manual = companies.filter((c) => !c.readable);
+  $("unreadable").innerHTML = manual.length
+    ? `Not scanned automatically. Use the bookmarklet in section 4 on their job pages instead:<ul>` +
+      manual.map((c) => `<li><strong>${esc(c.name)}</strong>: ${esc(c.note)}</li>`).join("") + "</ul>"
+    : "";
+}
+
+function bookmarkletHref() {
+  const o = location.origin;
+  const code =
+    `(()=>{const o=${JSON.stringify(o)};` +
+    `const m=document.querySelector('main');` +
+    `const t=(m&&m.innerText.length>500?m.innerText:document.body.innerText)||'';` +
+    `const d={type:'jt-import',url:location.href,title:document.title,text:t.slice(0,20000)};` +
+    `const w=window.open(o+'/import.html','_blank');` +
+    `if(!w){alert('Allow pop-ups for this site, then click Send to Job Tracker again.');return;}` +
+    `let n=0;const i=setInterval(()=>{try{w.postMessage(d,o)}catch(e){}if(++n>80)clearInterval(i)},250);` +
+    `addEventListener('message',e=>{if(e.origin===o&&e.data==='jt-got')clearInterval(i)});})();`;
+  return "javascript:" + encodeURIComponent(code);
+}
+
+$("resumeFile").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $("err").textContent = ""; $("busy").textContent = "Reading your resume…";
+  try {
+    state = await api("resume", {
+      method: "POST",
+      headers: { "content-type": "application/pdf", "x-filename": encodeURIComponent(file.name) },
+      body: file,
+    });
+    render();
+  } catch (err) { $("err").textContent = err.message; }
+  $("busy").textContent = ""; e.target.value = "";
+};
+
+$("scanNow").onclick = async () => {
+  $("discoverErr").textContent = "";
+  try {
+    await postJson("scan", {});
+    state = await api("state");
+    renderScan(); watchScan();
+  } catch (err) { $("discoverErr").textContent = err.message; }
+};
+
+$("demoReset").onclick = async (e) => {
+  const btn = e.target;
+  btn.disabled = true;
+  try { state = await postJson("demo-reset", {}); render(); } catch (err) { $("err").textContent = err.message; }
+  btn.disabled = false;
+};
+
+$("followUps").onclick = async (e) => {
+  const btn = e.target;
+  btn.disabled = true; $("followUpErr").textContent = "";
+  $("followUpNote").textContent = "Drafting follow-ups…";
+  try {
+    const r = await postJson("follow-ups", {});
+    if (r.started) {
+      $("followUpNote").textContent = "Started in the background. Drafts appear on the applications in a minute or two.";
+      setTimeout(async () => { state = await api("state").catch(() => state); renderApps(); }, 60000);
+    } else {
+      state = await api("state"); renderApps();
+      $("followUpNote").textContent = `${r.drafted} drafted` + (r.failed ? `, ${r.failed} failed (try again later).` : ".");
+    }
+  } catch (err) { $("followUpErr").textContent = err.message; }
+  btn.disabled = false;
+};
+
+$("chatForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $("chatInput").value.trim();
+  if (!text) return;
+  $("chatErr").textContent = "";
+  $("chatInput").value = "";
+  state.chat = [...state.chat, { role: "user", text, at: new Date().toISOString() }];
+  renderChat();
+  $("chatSend").disabled = true; $("chatBusy").textContent = "Thinking… (adding a job takes about 20 seconds)";
+  try {
+    await postJson("chat", { message: text });
+    state = await api("state");
+    render();
+    if (state.scan && !state.scan.finishedAt) watchScan();
+  } catch (err) {
+    $("chatErr").textContent = err.message;
+    $("chatInput").value = text;
+    state = await api("state").catch(() => state); renderChat();
+  }
+  $("chatSend").disabled = false; $("chatBusy").textContent = "";
+};
+
+$("chatReset").onclick = async (e) => {
+  e.preventDefault();
+  try { await postJson("chat-reset", {}); state.chat = []; renderChat(); } catch (err) { $("chatErr").textContent = err.message; }
+};
+
+$("jobs").onclick = async (e) => {
+  const id = e.target.dataset && e.target.dataset.track;
+  if (!id) return;
+  tracking.add(id); $("discoverErr").textContent = ""; renderJobs();
+  try {
+    await postJson("track", { id });
+    state = await api("state");
+  } catch (err) { $("discoverErr").textContent = err.message; }
+  tracking.delete(id); render();
+};
+
+for (const id of ["fLevel", "fCategory", "fCompany"]) $(id).onchange = renderJobs;
+$("fText").oninput = renderJobs;
+
+$("apply").onclick = async (e) => {
+  const btn = e.target;
+  const url = $("jobUrl").value.trim();
+  if (!url) { $("err").textContent = "Paste a job link first."; return; }
+  btn.disabled = true; $("err").textContent = ""; $("busy").textContent = "Reading the job posting and drafting your cover letter. This can take 20–30 seconds…";
+  try {
+    await postJson("apply", { url });
+    state = await api("state");
+    render();
+    $("jobUrl").value = "";
+  } catch (err) { $("err").textContent = err.message; }
+  btn.disabled = false; $("busy").textContent = "";
+};
+
+$("apps").onchange = async (e) => {
+  if (e.target.tagName !== "SELECT") return;
+  try { state = await postJson("status", { id: e.target.dataset.id, status: e.target.value }); render(); }
+  catch (err) { $("err").textContent = err.message; }
+};
+
+(async () => {
+  try {
+    $("bookmarklet").href = bookmarkletHref();
+    $("bookmarklet").onclick = (e) => { e.preventDefault(); alert("Drag this button to your bookmarks bar, then click it on a job page."); };
+    const config = await fetch("/api/config").then((r) => r.json()).catch(() => ({ demo: false }));
+    if (config.demo) BASE = `/agents/job-tracker/${visitorId()}`;
+    [state, companies, info] = await Promise.all([api("state"), api("companies"), api("info").catch(() => info)]);
+    fillFilters(); render();
+    if (state.scan && !state.scan.finishedAt) watchScan();
+  } catch (e) { $("err").textContent = e.message; }
+})();
+</script>
+</body>
+</html>

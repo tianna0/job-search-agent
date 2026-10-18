@@ -1,0 +1,141 @@
+# Daily job alerts at 7 pm Chicago time.
+#
+# GitHub cron runs in UTC and doesn't know about daylight saving, so this runs at
+# 00:00 and 01:00 UTC and the "Due today?" step lets through only the first run at
+# or after 19:00 in America/Chicago (once per day). Run it by hand any time from
+# the Actions tab ("Run workflow").
+#
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   SMTP_USER, SMTP_PASS     Gmail address + App Password
+#   CF_ACCOUNT_ID, CF_API_TOKEN  Workers AI, for ranking by resume
+#   RESUME_TEXT              your resume as plain text (optional if resume.pdf is in the repo)
+#   MAIL_TO                  optional, defaults to SMTP_USER
+#   STATE_KEY                any long random string; encrypts the list of jobs
+#                            already emailed, so it can live in a public repo
+# Variables (same page, "Variables" tab), optional:
+#   ALERT_LOCATIONS          e.g. United States, USA, US
+#   ALERT_TOP_N              default 8
+#   ALERT_MAX_AGE_DAYS       default 1 (only jobs posted today or yesterday)
+#
+# What was already emailed is committed back to the repo encrypted, as
+# .data/alerts-seen.json.enc (unreadable without STATE_KEY). The plain file is
+# never committed.
+name: Job alerts
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "send = normal run, dry-run = print the email in the log only, test-email = check SMTP"
+        type: choice
+        options: [send, dry-run, test-email]
+        default: send
+
+permissions:
+  contents: write
+
+concurrency:
+  group: job-alerts
+  cancel-in-progress: false
+
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TZ: America/Chicago
+      ALERT_HOUR: "19"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Due today?
+        id: due
+        run: |
+          today=$(date +%F)
+          hour=$(date +%-H)
+          last=$(cat .data/alerts-last-run 2>/dev/null || true)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$hour" -ge "$ALERT_HOUR" ] && [ "$last" != "$today" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Not due (Chicago time $(date '+%F %H:%M'), last run: ${last:-never})."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.due.outputs.run == 'true'
+        with:
+          node-version: 22
+
+      - name: Install
+        if: steps.due.outputs.run == 'true'
+        run: npm install --no-audit --no-fund
+
+      - name: Prepare
+        if: steps.due.outputs.run == 'true'
+        env:
+          RESUME_TEXT: ${{ secrets.RESUME_TEXT }}
+          STATE_KEY: ${{ secrets.STATE_KEY }}
+        run: |
+          touch .env
+          mkdir -p .data
+          if [ ! -f resume.pdf ] && [ -n "$RESUME_TEXT" ]; then
+            printf '%s\n' "$RESUME_TEXT" > resume.txt
+          fi
+          if [ -f .data/alerts-seen.json.enc ]; then
+            if [ -z "$STATE_KEY" ]; then
+              echo "::warning::STATE_KEY secret is not set; can't read which jobs were already emailed."
+            elif ! openssl enc -d -aes-256-cbc -pbkdf2 -in .data/alerts-seen.json.enc -out .data/alerts-seen.json -pass env:STATE_KEY 2>/dev/null; then
+              rm -f .data/alerts-seen.json
+              echo "::warning::Couldn't decrypt .data/alerts-seen.json.enc (STATE_KEY changed?). Starting fresh."
+            fi
+          fi
+
+      - name: Run job alerts
+        if: steps.due.outputs.run == 'true'
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          ALERT_LOCATIONS: ${{ vars.ALERT_LOCATIONS }}
+          ALERT_TOP_N: ${{ vars.ALERT_TOP_N }}
+          ALERT_MAX_AGE_DAYS: ${{ vars.ALERT_MAX_AGE_DAYS }}
+        run: |
+          case "${{ inputs.mode }}" in
+            dry-run)    npm run alerts -- --dry-run ;;
+            test-email) npm run alerts -- --test-email ;;
+            *)          npm run alerts ;;
+          esac
+
+      - name: Save what was sent
+        if: steps.due.outputs.run == 'true' && (inputs.mode == '' || inputs.mode == 'send')
+        env:
+          STATE_KEY: ${{ secrets.STATE_KEY }}
+        run: |
+          rm -f resume.txt
+          mkdir -p .data
+          date +%F > .data/alerts-last-run
+          git config user.name "job-alerts-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f .data/alerts-last-run
+          if [ -f .data/alerts-seen.json ]; then
+            if [ -n "$STATE_KEY" ]; then
+              openssl enc -aes-256-cbc -pbkdf2 -salt -in .data/alerts-seen.json -out .data/alerts-seen.json.enc -pass env:STATE_KEY
+              git add -f .data/alerts-seen.json.enc
+            else
+              echo "::warning::STATE_KEY secret is not set, so the list of emailed jobs isn't saved. Repeats are still limited by the posting-date filter."
+            fi
+          fi
+          rm -f .data/alerts-seen.json
+          if git diff --cached --quiet; then
+            echo "Nothing to save."
+          else
+            git commit -m "alerts: update seen jobs $(date +%F)"
+            git push
+          fi

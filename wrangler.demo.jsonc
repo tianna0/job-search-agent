@@ -1,0 +1,27 @@
+// Public demo: a separate Worker with its own data. Deploy with  npm run deploy:demo
+// Every visitor gets their own copy with a fictional sample resume; found jobs come
+// from a local scan you push with  npm run push-demo.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "job-tracker-demo",
+  "main": "src/cloudflare/worker.ts",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "ai": { "binding": "AI" },
+  "assets": { "directory": "./public" },
+  "durable_objects": {
+    "bindings": [{ "name": "JobTracker", "class_name": "JobTracker" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["JobTracker"] }],
+  "workflows": [
+    { "name": "follow-ups-demo", "binding": "FOLLOWUPS", "class_name": "FollowUpWorkflow" }
+  ],
+  // No cron: in the demo, follow-ups run when a visitor clicks "Draft follow-ups now".
+  "vars": {
+    "DEMO_MODE": "1",
+    "TEAM_DOMAIN": "",
+    "POLICY_AUD": ""
+  },
+  // Also set a secret for pushing jobs:  npx wrangler secret put DEMO_PUSH_TOKEN -c wrangler.demo.jsonc
+  "observability": { "enabled": true }
+}

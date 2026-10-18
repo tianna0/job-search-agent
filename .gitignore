@@ -1,0 +1,7 @@
+node_modules
+.env
+.data
+.wrangler
+# your resume for job alerts
+resume.pdf
+resume.txt

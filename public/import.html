@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Send to Job Tracker</title>
+<style>
+  :root { --bg:#fafaf9; --fg:#1c1917; --muted:#78716c; --card:#fff; --line:#e7e5e4; --accent:#ea580c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1c1917; --fg:#fafaf9; --muted:#a8a29e; --card:#292524; --line:#44403c; --accent:#fb923c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:20px; margin:0 0 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .muted { color:var(--muted); font-size:13px; }
+  pre { white-space:pre-wrap; font:13px/1.5 system-ui,sans-serif; max-height:220px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:10px; }
+  button { font:inherit; background:var(--accent); color:#fff; border:0; border-radius:6px; padding:8px 14px; cursor:pointer; margin-top:12px; }
+  button:disabled { opacity:.5; cursor:wait; }
+  a { color:var(--accent); }
+  .err { color:#dc2626; margin-top:8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Send to Job Tracker</h1>
+  <div class="card" id="card">
+    <p id="status" class="muted">Waiting for the job page… If nothing happens, close this tab and click the bookmarklet again on the job's page.</p>
+  </div>
+</main>
+<script>
+let BASE = "/agents/job-tracker/default";
+// crypto.randomUUID needs https; fall back to getRandomValues elsewhere.
+function newUuid() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+// In the public demo, send the job to this browser's own copy.
+fetch("/api/config").then((r) => r.json()).then((c) => {
+  if (!c.demo) return;
+  let id = null;
+  try { id = localStorage.getItem("jt-visitor"); } catch {}
+  if (!id || !/^v-[0-9a-f-]{36}$/.test(id)) {
+    id = "v-" + newUuid();
+    try { localStorage.setItem("jt-visitor", id); } catch {}
+  }
+  BASE = `/agents/job-tracker/${id}`;
+}).catch(() => {});
+const $ = (id) => document.getElementById(id);
+let payload = null;
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+
+function show() {
+  $("card").innerHTML = `
+    <div><strong>${esc(payload.title || "Untitled page")}</strong></div>
+    <div class="muted">${esc(payload.url)}</div>
+    <p class="muted">${payload.text.length.toLocaleString()} characters of page text. Check it's the job posting, then analyze it against your resume.</p>
+    <pre>${esc(payload.text.slice(0, 1500))}${payload.text.length > 1500 ? "\n…" : ""}</pre>
+    <button id="go">Analyze and add to tracker</button>
+    <div id="busy" class="muted"></div>
+    <div id="err" class="err"></div>`;
+  $("go").onclick = analyze;
+}
+
+async function analyze() {
+  $("go").disabled = true; $("err").textContent = "";
+  $("busy").textContent = "Scoring your fit and drafting a cover letter. This can take 20–30 seconds…";
+  try {
+    const res = await fetch(`${BASE}/import`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: payload.url, title: payload.title, text: payload.text }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    $("card").innerHTML = `
+      <div><strong>Added: ${esc(data.company)} · ${esc(data.title)}</strong></div>
+      <p>Fit score: <strong>${data.fitScore}</strong></p>
+      <p class="muted">Strengths: ${(data.strengths || []).map(esc).join("; ") || "—"}<br>Gaps: ${(data.gaps || []).map(esc).join("; ") || "—"}</p>
+      <a href="/">Open Job Tracker</a>`;
+  } catch (e) {
+    $("err").textContent = e.message; $("go").disabled = false; $("busy").textContent = "";
+  }
+}
+
+// The bookmarklet opens this page and keeps posting the job until we confirm.
+window.addEventListener("message", (e) => {
+  const d = e.data;
+  if (!d || d.type !== "jt-import" || payload) return;
+  if (typeof d.url !== "string" || typeof d.text !== "string") return;
+  payload = { url: d.url, title: String(d.title || ""), text: d.text.slice(0, 20000) };
+  try { e.source.postMessage("jt-got", e.origin); } catch {}
+  show();
+});
+</script>
+</body>
+</html>
