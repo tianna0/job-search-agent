@@ -19,6 +19,8 @@ test("categories follow the six title groups", () => {
     ["Test Automation Engineer", "QA/SDET"],
     ["Software Development Engineer I", "SDE"],
     ["SDE II", "SDE"],
+    ["Software Developer", "SDE"],
+    ["Software Developer - Trading Systems", "SDE"],
     ["Software Engineer, New Grad", "SWE"],
     ["Data Scientist", null],
     ["Product Manager", null],

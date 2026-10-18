@@ -26,7 +26,7 @@ const CATEGORY_RULES: [Category, RegExp][] = [
   ["Full-stack", /full[\s-]?stack/i],
   ["Frontend", /front[\s-]?end|\bui software/i],
   ["Backend", /back[\s-]?end/i],
-  ["SDE", /software (development|dev|developer) engineer|\bsde\b/i],
+  ["SDE", /software (development|dev|developer) engineer|\bsoftware developer\b|\bsde\b/i],
   ["SWE", /software engineer/i],
 ];
 
