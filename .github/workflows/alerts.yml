@@ -1,9 +1,11 @@
 # Daily job alerts at 7 pm Chicago time.
 #
-# GitHub cron runs in UTC and doesn't know about daylight saving, so this runs at
-# 00:00 and 01:00 UTC and the "Due today?" step lets through only the first run at
-# or after 19:00 in America/Chicago (once per day). Run it by hand any time from
-# the Actions tab ("Run workflow").
+# GitHub cron runs in UTC, ignores daylight saving, and often starts scheduled
+# runs hours late (worst at the top of the hour). So it is scheduled several times
+# a night, off the hour, and the "Due?" step lets exactly one run through per
+# daily slot. The slot is "today 19:00 Chicago time"; a run before 19:00 belongs
+# to yesterday's slot, so a run delayed past midnight still sends yesterday's email
+# instead of skipping it. Run it by hand any time from the Actions tab.
 #
 # Secrets (Settings -> Secrets and variables -> Actions):
 #   SMTP_USER, SMTP_PASS     Gmail address + App Password
@@ -24,8 +26,12 @@ name: Job alerts
 
 on:
   schedule:
-    - cron: "0 0 * * *"
-    - cron: "0 1 * * *"
+    - cron: "17 0 * * *"   # 7:17 pm CDT
+    - cron: "17 1 * * *"   # 7:17 pm CST, or a retry in summer
+    - cron: "17 2 * * *"   # retries if GitHub skipped or delayed the runs above
+    - cron: "47 3 * * *"
+    - cron: "17 7 * * *"
+    - cron: "17 13 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -51,18 +57,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Due today?
+      - name: Due?
         id: due
         run: |
-          today=$(date +%F)
           hour=$(date +%-H)
+          if [ "$hour" -ge "$ALERT_HOUR" ]; then slot=$(date +%F); else slot=$(date -d yesterday +%F); fi
           last=$(cat .data/alerts-last-run 2>/dev/null || true)
+          echo "slot=$slot" >> "$GITHUB_OUTPUT"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ "$hour" -ge "$ALERT_HOUR" ] && [ "$last" != "$today" ]; then
+          elif [ -z "$last" ] || [[ "$last" < "$slot" ]]; then
+            echo "Running the $slot slot (Chicago time $(date '+%F %H:%M'))."
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Not due (Chicago time $(date '+%F %H:%M'), last run: ${last:-never})."
+            echo "Not due: the $slot slot already ran (Chicago time $(date '+%F %H:%M'))."
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -120,7 +128,7 @@ jobs:
         run: |
           rm -f resume.txt
           mkdir -p .data
-          date +%F > .data/alerts-last-run
+          echo "${{ steps.due.outputs.slot }}" > .data/alerts-last-run
           git config user.name "job-alerts-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f .data/alerts-last-run
