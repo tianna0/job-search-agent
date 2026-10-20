@@ -51,29 +51,7 @@ test("filterByLocation matches whole words and understands US state codes", () =
   assert.deepEqual(filterByLocation(jobs, ["United States", "USA", "US"]).map((j) => j.id), ["dash", "state", "usa", "remote"]);
 });
 
-test("renderEmail groups entry before maybe, escapes HTML, notes failures", () => {
-  const jobs = [
-    job("m1", { level: "maybe", companyName: "Airbnb", title: "Software Engineer II" }),
-    job("e1", { companyName: "Stripe", title: "New Grad <script>" }),
-    job("e2", { companyName: "Anthropic", title: "Software Engineer, New Grad" }),
-  ];
-  const email = renderEmail(jobs, { date: new Date("2026-10-11T13:00:00Z"), failed: ["Apple"] });
-  assert.equal(email.subject, "3 new jobs for you (2 entry, 1 maybe) · 2026-10-11");
-  const anth = email.text.indexOf("Anthropic"), str = email.text.indexOf("Stripe"), air = email.text.indexOf("Airbnb");
-  assert.ok(anth < str && str < air, "entry jobs first, then by company");
-  assert.match(email.text, /Couldn't read today: Apple/);
-  assert.match(email.html, /New Grad &lt;script&gt;/);
-  assert.doesNotMatch(email.html, /<script>/);
-  assert.match(email.html, /href="https:\/\/stripe\.example\/e1"/);
-});
 
-test("renderEmail: first-run wording, singular subject, long lists are cut", () => {
-  const one = renderEmail([job("a")], { date: new Date("2026-10-11"), firstRun: true });
-  assert.match(one.subject, /^1 new job for you/);
-  assert.match(one.text, /First run/);
-  const many = renderEmail(Array.from({ length: 230 }, (_, i) => job(`j${i}`)), { date: new Date("2026-10-11") });
-  assert.match(many.text, /…and 30 more\./);
-});
 
 test("launchd plist runs npm run alerts daily through a login shell", () => {
   const xml = plistXml("/Users/me/Downloads/job tracker's app", 8);
@@ -142,26 +120,7 @@ test("rankJobs: a failed note keeps the score; topN 0 means no model calls", asy
   await assert.rejects(rankJobs("   ", jobs, fakeEmbed, null), /resume is empty/);
 });
 
-test("renderEmail with a ranking: top picks with reasons first, then the rest by score", () => {
-  const jobs = [job("low", { companyName: "Airbnb" }), job("top", { companyName: "Stripe", level: "maybe" }), job("mid", { companyName: "Reddit" })];
-  const email = renderEmail(jobs, {
-    date: new Date("2026-10-11T00:00:00Z"),
-    ranking: { scores: { low: 41, top: 88, mid: 67 }, notes: { top: { fit: 85, why: "Python <services>", gap: "No Kafka" } } },
-  });
-  assert.match(email.subject, /best match: Stripe \(88\)/);
-  const t = email.text;
-  assert.ok(t.indexOf("TOP PICKS") < t.indexOf("[Match 88 · Maybe] Stripe") && t.indexOf("Stripe") < t.indexOf("OTHER NEW JOBS"));
-  assert.ok(t.indexOf("[Match 67 · Entry] Reddit") < t.indexOf("[Match 41 · Entry] Airbnb"));
-  assert.match(t, /Why: Python <services>\n  Gap: No Kafka/);
-  assert.match(email.html, /✓ Python &lt;services&gt;/);
-  assert.match(t, /embedding similarity/);
-});
 
-test("renderEmail explains when ranking wasn't available", () => {
-  const email = renderEmail([job("a")], { date: new Date(), rankingError: "no resume found." });
-  assert.match(email.text, /Ranking by resume wasn't available today: no resume found\./);
-  assert.match(email.text, /ENTRY LEVEL/, "falls back to grouping by level");
-});
 
 // ---------- posting dates ----------
 import { firstDate, toIsoDate, workdayPosted } from "../src/core/discover/posted.ts";
@@ -203,11 +162,71 @@ test("splitByAge keeps recent jobs (with a day of slack), separates old and unda
   assert.equal(splitByAge(jobs, 0, now).recent.length, 4, "0 = no age filter");
 });
 
-test("emails show the posting date", () => {
+
+// ---------- email layout ----------
+
+test("email: Entry and Maybe sections, summary line, escaping, failures", () => {
+  const jobs = [
+    job("m1", { level: "maybe", companyName: "Airbnb", title: "Software Engineer II", reasons: ["title: Software Engineer II"] }),
+    job("e1", { companyName: "Stripe", title: "New Grad <script>" }),
+    job("e2", { companyName: "Anthropic", title: "Software Engineer, New Grad" }),
+  ];
+  const email = renderEmail(jobs, { date: new Date("2026-10-11T18:00:00Z"), failed: ["Apple"], maxAgeDays: 1, openMatches: 85, timeZone: "America/Chicago" });
+  assert.equal(email.subject, "Entry-level SWE jobs · 2 entry · 1 maybe · 2026-10-11");
+  const t = email.text;
+  assert.match(t, /2 entry · 1 maybe · newly posted since the last email · 85 matching roles open in total/);
+  assert.ok(t.indexOf("ENTRY — CLEAR EARLY-CAREER MATCHES (2)") < t.indexOf("Anthropic"));
+  assert.ok(t.indexOf("Anthropic") < t.indexOf("Stripe") && t.indexOf("Stripe") < t.indexOf("MAYBE — BORDERLINE (1)"));
+  assert.ok(t.indexOf("MAYBE — BORDERLINE") < t.indexOf("Airbnb"));
+  assert.match(t, /Rule: title: Software Engineer II/);
+  assert.match(t, /Couldn't read today: Apple/);
+  assert.match(email.html, /New Grad &lt;script&gt;/);
+  assert.doesNotMatch(email.html, /<script>/);
+  assert.match(email.html, /href="https:\/\/stripe\.example\/e1"/);
+  assert.match(email.html, /<b style="color:#15803d">2 entry<\/b> · 1 maybe/);
+});
+
+test("email: empty section says none today; long sections are cut", () => {
+  const one = renderEmail([job("a", { level: "maybe" })], { date: new Date("2026-10-11T18:00:00Z") });
+  assert.match(one.text, /ENTRY — CLEAR EARLY-CAREER MATCHES \(0\)\n\n\(none today\)/);
+  assert.match(one.html, /\(none today\)/);
+  const many = renderEmail(Array.from({ length: 230 }, (_, i) => job(`j${i}`)), { date: new Date("2026-10-11T18:00:00Z") });
+  assert.match(many.text, /…and 30 more\./);
+});
+
+test("email with a ranking: sorted by match inside each section, notes in Why", () => {
+  const jobs = [
+    job("low", { companyName: "Airbnb" }),
+    job("top", { companyName: "Stripe", level: "maybe" }),
+    job("mid", { companyName: "Reddit" }),
+  ];
+  const email = renderEmail(jobs, {
+    date: new Date("2026-10-11T18:00:00Z"),
+    ranking: { scores: { low: 41, top: 88, mid: 67 }, notes: { top: { fit: 85, why: "Python <services>", gap: "No Kafka" } } },
+  });
+  assert.match(email.subject, /best match: Stripe \(88\)/);
+  const t = email.text;
+  assert.ok(t.indexOf("[Match 67] Reddit") < t.indexOf("[Match 41] Airbnb"), "entry sorted by score");
+  assert.ok(t.indexOf("[Match 41] Airbnb") < t.indexOf("[Match 88] Stripe"), "maybe section comes after entry");
+  assert.match(t, /Why: Python <services>\n  Gap: No Kafka/);
+  assert.match(email.html, /✓ Python &lt;services&gt;/);
+  assert.match(email.html, /<th[^>]*>Match<\/th>/);
+  assert.match(t, /embedding similarity/);
+});
+
+test("email explains when ranking wasn't available, and has no Match column", () => {
+  const email = renderEmail([job("a")], { date: new Date(), rankingError: "no resume found." });
+  assert.match(email.text, /Ranking by resume wasn't available today: no resume found\./);
+  assert.doesNotMatch(email.html, /<th[^>]*>Match<\/th>/);
+});
+
+test("email shows the posting date", () => {
   assert.equal(postedLabel(job("a", { postedAt: "2026-10-17T15:00:00Z" }), "America/Chicago"), "Posted Oct 17");
-  assert.equal(postedLabel(job("b")), "Posted date not given");
-  const email = renderEmail([job("a", { postedAt: "2026-10-17T15:00:00Z" })], { date: new Date("2026-10-17T19:00:00Z"), maxAgeDays: 1, timeZone: "America/Chicago" });
-  assert.match(email.text, /Newly posted matching jobs/);
-  assert.match(email.text, /Posted Oct 17 · New York, NY/);
-  assert.match(email.html, /Posted Oct 17 · Entry/);
+  const email = renderEmail([job("a", { postedAt: "2026-10-17T15:00:00Z" }), job("b", { title: "No date" })], {
+    date: new Date("2026-10-17T19:00:00Z"),
+    timeZone: "America/Chicago",
+  });
+  assert.match(email.text, /New York, NY · SWE · Posted 2026-10-17/);
+  assert.match(email.text, /Posted Not given/);
+  assert.match(email.html, />2026-10-17</);
 });

@@ -137,6 +137,13 @@ export function classify(title: string, description = ""): Classification {
   }
 
   // A JD range like "1-3 years" demotes an otherwise entry-level title.
-  const level: Level = maybe && !TITLE_ENTRY.test(t) ? "maybe" : entry ? "entry" : maybe ? "maybe" : "unknown";
+  let level: Level = maybe && !TITLE_ENTRY.test(t) ? "maybe" : entry ? "entry" : maybe ? "maybe" : "unknown";
+  // A plain title whose description we read but that never says how much
+  // experience it wants: worth a look, so it's a Maybe. Without a description
+  // (title-only screening) it stays unknown so the description gets fetched.
+  if (level === "unknown" && category && description.trim()) {
+    level = "maybe";
+    reasons.push("JD doesn't state years of experience");
+  }
   return { category, level, reasons: [...new Set(reasons)] };
 }

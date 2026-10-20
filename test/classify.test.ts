@@ -98,13 +98,24 @@ test("plain titles are decided by the job description", () => {
   assert.equal(classify("Software Engineer", "5 years of industry experience").level, "excluded");
 });
 
+test("a plain title whose JD doesn't state years is a Maybe", () => {
+  const c = classify("Software Engineer, Payments", "You will build APIs in Go and work with product teams.");
+  assert.equal(c.level, "maybe");
+  assert.deepEqual(c.reasons, ["JD doesn't state years of experience"]);
+  assert.equal(classify("Software Engineer, Payments").level, "unknown", "no description yet: fetch it first");
+  assert.equal(classify("Product Designer", "Design things.").level, "unknown", "not a software role");
+  assert.equal(classify("Senior Software Engineer", "Build APIs.").level, "excluded");
+});
+
 test("a 3+ year requirement overrides an entry-level title", () => {
   assert.equal(classify("Software Engineer I", "Requires 4+ years of experience").level, "excluded");
 });
 
 test("years that are not about experience are ignored", () => {
   assert.deepEqual(yearsMentions("Founded 10 years ago. We offer 3 years of vesting."), []);
-  assert.equal(classify("Software Engineer", "Our company has 12 years of history.").level, "unknown");
+  const c = classify("Software Engineer", "Our company has 12 years of history.");
+  assert.equal(c.level, "maybe", "not an experience requirement, so the JD states no years");
+  assert.deepEqual(c.reasons, ["JD doesn't state years of experience"]);
 });
 
 test("clearance and citizenship requirements are excluded", () => {

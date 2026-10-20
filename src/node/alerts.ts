@@ -163,7 +163,7 @@ async function main() {
     }
   }
 
-  const email = renderEmail(toSend, { date: started, failed, firstRun, ranking, rankingError, maxAgeDays: args.has("--all") ? 0 : maxAgeDays });
+  const email = renderEmail(toSend, { date: started, failed, firstRun, ranking, rankingError, maxAgeDays: args.has("--all") ? 0 : maxAgeDays, openMatches: relevant.length });
   if (args.has("--dry-run")) {
     console.log(`\n--- dry run: this email would be sent to ${mailConfig().to ?? "(set MAIL_TO or SMTP_USER)"} ---`);
     console.log(`Subject: ${email.subject}\n`);

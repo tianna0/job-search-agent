@@ -94,23 +94,22 @@ export interface AlertEmail {
   html: string;
 }
 
-/** Entry first, then by company and title. */
-function sorted(jobs: DiscoveredJob[]): DiscoveredJob[] {
-  return [...jobs].sort(
-    (a, b) =>
-      (a.level === b.level ? 0 : a.level === "entry" ? -1 : 1) ||
-      a.companyName.localeCompare(b.companyName) ||
-      a.title.localeCompare(b.title)
-  );
-}
-
 export interface EmailRanking {
   scores: Record<string, number>;
   notes: Record<string, { fit: number; why: string; gap: string }>;
 }
 
-const levelLabel = (j: DiscoveredJob) => (j.level === "entry" ? "Entry" : "Maybe");
+const shortDate = (j: DiscoveredJob, timeZone?: string) => {
+  const d = j.postedAt ? new Date(j.postedAt) : null;
+  return d && !Number.isNaN(d.getTime())
+    ? d.toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", ...(timeZone ? { timeZone } : {}) })
+    : "Not given";
+};
 
+/**
+ * The daily email: a summary line, then two tables, Entry (clear matches) and
+ * Maybe (borderline), each sorted by resume match when there is a ranking.
+ */
 export function renderEmail(
   jobs: DiscoveredJob[],
   opts: {
@@ -122,88 +121,94 @@ export function renderEmail(
     /** Only jobs posted in the last N days were included (0 or unset = no age filter). */
     maxAgeDays?: number;
     timeZone?: string;
+    /** How many matching jobs are open in total (for the summary line). */
+    openMatches?: number;
   }
 ): AlertEmail {
   const ranked = Boolean(opts.ranking && Object.keys(opts.ranking.scores).length);
   const score = (j: DiscoveredJob) => opts.ranking?.scores[j.id] ?? 0;
-  const list = ranked ? [...jobs].sort((a, b) => score(b) - score(a) || a.companyName.localeCompare(b.companyName)) : sorted(jobs);
-  const entry = list.filter((j) => j.level === "entry").length;
-  const maybe = list.length - entry;
-  const day = opts.date.toISOString().slice(0, 10);
-  const top = ranked ? list[0] : undefined;
+  const order = (a: DiscoveredJob, b: DiscoveredJob) =>
+    (ranked ? score(b) - score(a) : 0) || a.companyName.localeCompare(b.companyName) || a.title.localeCompare(b.title);
+  const entryJobs = jobs.filter((j) => j.level === "entry").sort(order);
+  const maybeJobs = jobs.filter((j) => j.level !== "entry").sort(order);
+  const day = opts.date.toLocaleDateString("en-CA", opts.timeZone ? { timeZone: opts.timeZone } : {});
+  const best = ranked ? [...entryJobs, ...maybeJobs].sort((a, b) => score(b) - score(a))[0] : undefined;
+
   const subject =
-    `${list.length} new job${list.length === 1 ? "" : "s"} for you (${entry} entry, ${maybe} maybe)` +
-    (top ? ` · best match: ${top.companyName} (${score(top)})` : "") +
+    `Entry-level SWE jobs · ${entryJobs.length} entry · ${maybeJobs.length} maybe` +
+    (best ? ` · best match: ${best.companyName} (${score(best)})` : "") +
     ` · ${day}`;
 
-  const shown = list.slice(0, MAX_LISTED);
-  const more = list.length - shown.length;
-  const fresh = (opts.maxAgeDays ?? 0) > 0;
-  const intro = fresh
-    ? "Newly posted matching jobs (posted since the last email, or first listed since then when the site doesn't give a date):"
-    : opts.firstRun
-      ? "First run: these are all the matching jobs open right now. From now on you'll only get new ones."
-      : "New since the last email:";
-  const posted = (j: DiscoveredJob) => postedLabel(j, opts.timeZone);
+  const summary =
+    `${entryJobs.length} entry · ${maybeJobs.length} maybe` +
+    ((opts.maxAgeDays ?? 0) > 0 ? " · newly posted since the last email" : opts.firstRun ? " · first run: every open match" : " · new since the last email") +
+    (opts.openMatches !== undefined ? ` · ${opts.openMatches} matching roles open in total` : "");
+
   const notes: string[] = [];
   if (opts.failed?.length) notes.push(`Couldn't read today: ${opts.failed.join(", ")}. They'll be tried again next time.`);
   if (ranked) notes.push("Match = how close the job description is to your resume (embedding similarity, 0-100). It ranks jobs against each other; it isn't a probability.");
   if (opts.rankingError) notes.push(`Ranking by resume wasn't available today: ${opts.rankingError}`);
 
-  // Groups: ranked -> top picks (have notes) + the rest; unranked -> entry + maybe.
-  const groups: { title: string; jobs: DiscoveredJob[] }[] = ranked
-    ? [
-        { title: "Top picks for your resume", jobs: shown.filter((j) => opts.ranking!.notes[j.id]) },
-        { title: "Other new jobs (closest match first)", jobs: shown.filter((j) => !opts.ranking!.notes[j.id]) },
-      ]
-    : [
-        { title: "Entry level", jobs: shown.filter((j) => j.level === "entry") },
-        { title: "Maybe (level II / 3-4 / 1-3 years)", jobs: shown.filter((j) => j.level === "maybe") },
-      ];
+  const sections = [
+    { title: "Entry — clear early-career matches", jobs: entryJobs.slice(0, MAX_LISTED), more: Math.max(0, entryJobs.length - MAX_LISTED) },
+    { title: "Maybe — borderline", jobs: maybeJobs.slice(0, MAX_LISTED), more: Math.max(0, maybeJobs.length - MAX_LISTED) },
+  ];
 
-  const tag = (j: DiscoveredJob) => (ranked ? `[Match ${score(j)} · ${levelLabel(j)}] ` : "");
-  const textLines = [intro, ""];
-  for (const g of groups) {
-    if (!g.jobs.length) continue;
-    textLines.push(g.title.toUpperCase(), "");
-    for (const j of g.jobs) {
-      textLines.push(`- ${tag(j)}${j.companyName}: ${j.title}`);
+  // ---------- plain text ----------
+  const textLines = [`Entry-level SWE jobs — ${day}`, summary, ""];
+  for (const sec of sections) {
+    textLines.push(`${sec.title.toUpperCase()} (${sec.jobs.length + sec.more})`, "");
+    if (!sec.jobs.length) textLines.push("(none today)", "");
+    for (const j of sec.jobs) {
+      textLines.push(`- ${ranked ? `[Match ${score(j)}] ` : ""}${j.companyName}: ${j.title}`);
+      textLines.push(`  ${j.location || "Location not listed"} · ${j.category} · Posted ${shortDate(j, opts.timeZone)}`);
       const note = opts.ranking?.notes[j.id];
       if (note) textLines.push(`  Why: ${note.why}`, ...(note.gap ? [`  Gap: ${note.gap}`] : []));
-      textLines.push(`  ${posted(j)} · ${j.location || "Location not listed"} · ${j.category} · ${j.reasons.join("; ")}`, `  ${j.url}`, "");
+      textLines.push(`  Rule: ${j.reasons.join("; ")}`, `  ${j.url}`, "");
     }
+    if (sec.more) textLines.push(`…and ${sec.more} more.`, "");
   }
-  if (more > 0) textLines.push(`…and ${more} more.`, "");
   textLines.push(...notes);
   const text = textLines.join("\n");
 
-  const badge = (j: DiscoveredJob) =>
-    ranked
-      ? `<span style="display:inline-block;min-width:34px;text-align:center;background:#fff7ed;color:#c2410c;border:1px solid #fdba74;border-radius:999px;font-size:12px;font-weight:600;padding:0 6px;margin-right:6px">${score(j)}</span>`
-      : "";
-  const section = (g: { title: string; jobs: DiscoveredJob[] }) => {
-    if (!g.jobs.length) return "";
-    const rows = g.jobs
+  // ---------- HTML ----------
+  const th = (t: string) => `<th style="text-align:left;padding:10px 8px;font-size:13px;white-space:nowrap">${t}</th>`;
+  const td = (h: string, extra = "") => `<td style="padding:10px 8px;vertical-align:top;border-top:1px solid #e7e5e4;font-size:13px${extra}">${h}</td>`;
+  const table = (list: DiscoveredJob[], head: string) => {
+    const rows = list
       .map((j) => {
         const note = opts.ranking?.notes[j.id];
-        const noteHtml = note
-          ? `<br><span style="font-size:13px">✓ ${esc(note.why)}</span>${note.gap ? `<br><span style="font-size:13px;color:#78716c">△ ${esc(note.gap)}</span>` : ""}`
-          : "";
+        const why =
+          (note ? `✓ ${esc(note.why)}${note.gap ? `<br><span style="color:#78716c">△ ${esc(note.gap)}</span>` : ""}<br>` : "") +
+          `<span style="color:#78716c">${esc(j.reasons.join("; "))}</span>`;
         return `<tr>
-  <td style="padding:8px 12px 8px 0;vertical-align:top;font-weight:600;white-space:nowrap">${badge(j)}${esc(j.companyName)}</td>
-  <td style="padding:8px 0;vertical-align:top"><a href="${esc(j.url)}" style="color:#c2410c">${esc(j.title)}</a>${noteHtml}<br>
-  <span style="color:#78716c;font-size:13px">${esc(posted(j))} · ${esc(levelLabel(j))} · ${esc(j.location || "Location not listed")} · ${esc(j.category)} · ${esc(j.reasons.join("; "))}</span></td>
+  ${td(`<b>${esc(j.companyName)}</b>`)}
+  ${td(`<a href="${esc(j.url)}" style="color:#1d4ed8">${esc(j.title)}</a>`, ";min-width:160px")}
+  ${td(esc(j.location || "Not listed"))}
+  ${td(esc(j.category), ";white-space:nowrap")}
+  ${td(esc(shortDate(j, opts.timeZone)), ";white-space:nowrap")}
+  ${ranked ? td(`<b>${score(j)}</b>`, ";text-align:center") : ""}
+  ${td(why, ";min-width:200px")}
 </tr>`;
       })
       .join("\n");
-    return `<h3 style="margin:20px 0 4px;font-size:16px">${esc(g.title)}</h3><table style="border-collapse:collapse">${rows}</table>`;
+    return `<table style="border-collapse:collapse;width:100%">
+<tr style="background:${head}">${th("Company")}${th("Role")}${th("Location")}${th("Type")}${th("Posted")}${ranked ? th("Match") : ""}${th("Why")}</tr>
+${rows}
+</table>`;
   };
-  const html = `<div style="font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#1c1917;max-width:720px">
-<p>${esc(intro)}</p>
-${groups.map(section).join("\n")}
-${more > 0 ? `<p>…and ${more} more.</p>` : ""}
-${notes.map((n) => `<p style="color:#78716c;font-size:13px">${esc(n)}</p>`).join("\n")}
-<p style="color:#a8a29e;font-size:12px">Sent by your Job Tracker. Screening rules: src/core/discover/classify.ts</p>
+  const sectionHtml = (sec: (typeof sections)[number], head: string) =>
+    `<h3 style="margin:24px 0 8px;font-size:16px">${esc(sec.title)} (${sec.jobs.length + sec.more})</h3>` +
+    (sec.jobs.length ? table(sec.jobs, head) : `<p style="color:#78716c;font-style:italic;margin:0">(none today)</p>`) +
+    (sec.more ? `<p>…and ${sec.more} more.</p>` : "");
+
+  const html = `<div style="font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#1c1917;max-width:960px">
+<h2 style="margin:0 0 6px;font-size:20px">Entry-level SWE Jobs — ${esc(day)}</h2>
+<p style="margin:0;color:#57534e"><b style="color:#15803d">${entryJobs.length} entry</b> · ${esc(summary.replace(/^\d+ entry · /, ""))}</p>
+${sectionHtml(sections[0], "#dcfce7")}
+${sectionHtml(sections[1], "#fef9c3")}
+${notes.map((n) => `<p style="color:#78716c;font-size:12px;margin:16px 0 0">${esc(n)}</p>`).join("\n")}
+<p style="color:#a8a29e;font-size:12px">Sent by your Job Search Agent. Screening rules: src/core/discover/classify.ts</p>
 </div>`;
   return { subject, text, html };
 }
