@@ -61,17 +61,43 @@ export function postedLabel(j: DiscoveredJob, timeZone?: string): string {
   return `Posted ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(timeZone ? { timeZone } : {}) })}`;
 }
 
-const US_STATES =
-  "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" ");
+const US_STATES = new Set(
+  "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" ")
+);
 const US_KEYS = new Set(["us", "usa", "u.s.", "united states", "united states of america"]);
-/** "Seattle, WA" / "Austin, TX, Remote": a US state code after a comma. */
-const US_STATE_RE = new RegExp(`,\\s*(${US_STATES.join("|")})\\b`);
+/** Countries that show up on these boards. A place naming one of them is not in the US. */
+const FOREIGN =
+  /\b(india|canada|united kingdom|england|scotland|ireland|germany|france|netherlands|spain|portugal|poland|switzerland|sweden|denmark|norway|finland|israel|singapore|japan|china|hong kong|taiwan|korea|australia|new zealand|brazil|mexico|argentina|colombia|chile|philippines|vietnam|indonesia|malaysia|thailand|uae|united arab emirates|saudi arabia|egypt|nigeria|kenya|south africa|romania|czech|serbia|ukraine|turkey|italy|belgium|austria|luxembourg|estonia|lithuania|latvia|greece|hungary|costa rica|uruguay|peru)\b|\b(bengaluru|bangalore|hyderabad|pune|mumbai|chennai|gurgaon|gurugram|noida|new delhi|delhi|kolkata|ahmedabad|toronto|vancouver|montreal|ottawa|waterloo|london|dublin|berlin|munich|paris|amsterdam|tel aviv|tokyo|sydney|melbourne|sao paulo|são paulo|mexico city|warsaw|krakow|bucharest|zurich|stockholm|copenhagen|aarhus|barcelona|madrid|lisbon|seoul|shanghai|beijing|shenzhen|manila)\b/i;
 const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** A location string may list several places: "Bengaluru, India; Seattle, WA". */
+function places(location: string): string[] {
+  return location.split(/;|\||\n|\s\/\s|\s+or\s+/i).map((p) => p.trim()).filter(Boolean);
+}
+
 /**
- * Keep jobs whose location mentions one of the keywords as a whole word
- * ("US" matches "Remote - US" but not "Aarhus"). A US keyword also matches
- * "City, ST" with a US state code. Jobs with no location are kept.
+ * Is one place in the US, judging by its shape?
+ *   "Seattle, WA" / "Seattle, WA, USA" / "US-CA-Menlo Park" / "US, CA, Santa Clara" -> yes
+ *   "Bengaluru, KA, IN" (IN = India, after a region code) / "Toronto, ON, CA" -> no
+ */
+function looksUs(place: string): boolean {
+  if (FOREIGN.test(place)) return false;
+  const parts = place.split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const last = parts[parts.length - 1];
+    const prev = parts[parts.length - 2];
+    // "City, XX, YY": YY is a country code after a region code.
+    if (/^[A-Z]{2,3}$/.test(last) && /^[A-Z]{2}$/.test(prev)) return last === "US" || last === "USA";
+    if (US_STATES.has(last)) return true; // "City, ST"
+  }
+  return /^US[-,\s]/.test(place); // Workday style: "US-CA-Menlo Park", "US, CA, Santa Clara"
+}
+
+/**
+ * Keep jobs where at least one listed place matches: a keyword as a whole word
+ * ("US" matches "Remote - US" but not "Aarhus"), or, when a keyword means the US,
+ * a place shaped like a US address. A place naming another country never counts
+ * as US through its shape. Jobs with no location are kept.
  */
 export function filterByLocation(jobs: DiscoveredJob[], keywords: string[]): DiscoveredJob[] {
   const keys = keywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
@@ -81,7 +107,11 @@ export function filterByLocation(jobs: DiscoveredJob[], keywords: string[]): Dis
   return jobs.filter((j) => {
     const loc = j.location.trim();
     if (!loc) return true;
-    return res.some((re) => re.test(loc)) || (wantsUs && US_STATE_RE.test(loc));
+    return places(loc).some((p) => {
+      // Keyword hits only count for the place they're in; "IN" in "Bengaluru, KA, IN" is not "US".
+      if (res.some((re) => re.test(p))) return !(wantsUs && FOREIGN.test(p) && !/\b(usa|united states)\b/i.test(p));
+      return wantsUs && looksUs(p);
+    });
   });
 }
 

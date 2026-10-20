@@ -15,7 +15,7 @@
 #   STATE_KEY                any long random string; encrypts the list of jobs
 #                            already emailed, so it can live in a public repo
 # Variables (same page, "Variables" tab), optional:
-#   ALERT_LOCATIONS          e.g. United States, USA, US
+#   ALERT_LOCATIONS          default: United States, USA, US (US jobs only)
 #   ALERT_TOP_N              default 8
 #   ALERT_MAX_AGE_DAYS       default 1 (only jobs posted today or yesterday)
 #
@@ -111,7 +111,7 @@ jobs:
           MAIL_TO: ${{ secrets.MAIL_TO }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          ALERT_LOCATIONS: ${{ vars.ALERT_LOCATIONS }}
+          ALERT_LOCATIONS: ${{ vars.ALERT_LOCATIONS || 'United States, USA, US' }}
           ALERT_TOP_N: ${{ vars.ALERT_TOP_N }}
           ALERT_MAX_AGE_DAYS: ${{ vars.ALERT_MAX_AGE_DAYS }}
         run: |

@@ -230,3 +230,24 @@ test("email shows the posting date", () => {
   assert.match(email.text, /Posted Not given/);
   assert.match(email.html, />2026-10-17</);
 });
+
+test("filterByLocation: Indian and Canadian codes aren't US states", () => {
+  const jobs = [
+    job("blr", { location: "Bengaluru, KA, IN" }),
+    job("hyd", { location: "Hyderabad, IN" }),
+    job("hyd2", { location: "Hyderabad, Telangana, IND" }),
+    job("pune", { location: "IN, MH, Pune" }),
+    job("tor", { location: "Toronto, ON, CA" }),
+    job("india-remote", { location: "Remote - India" }),
+    job("indy", { location: "Indianapolis, IN" }),
+    job("sea", { location: "Seattle, WA" }),
+    job("sea-usa", { location: "Seattle, WA, USA" }),
+    job("wd", { location: "US, CA, Santa Clara" }),
+    job("mixed", { location: "Bengaluru, India; Seattle, WA" }),
+    job("both", { location: "Toronto, Canada / Remote in US" }),
+  ];
+  assert.deepEqual(
+    filterByLocation(jobs, ["United States", "USA", "US"]).map((j) => j.id),
+    ["indy", "sea", "sea-usa", "wd", "mixed", "both"]
+  );
+});
