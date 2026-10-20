@@ -183,7 +183,7 @@ test("email: Entry and Maybe sections, summary line, escaping, failures", () => 
   assert.match(email.html, /New Grad &lt;script&gt;/);
   assert.doesNotMatch(email.html, /<script>/);
   assert.match(email.html, /href="https:\/\/stripe\.example\/e1"/);
-  assert.match(email.html, /<b style="color:#15803d">2 entry<\/b> · 1 maybe/);
+  assert.match(email.html, /<b style="color:#3E6D69">2 entry<\/b> · 1 maybe/);
 });
 
 test("email: empty section says none today; long sections are cut", () => {

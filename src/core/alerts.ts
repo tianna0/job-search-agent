@@ -202,43 +202,49 @@ export function renderEmail(
   const text = textLines.join("\n");
 
   // ---------- HTML ----------
-  const th = (t: string) => `<th style="text-align:left;padding:10px 8px;font-size:13px;white-space:nowrap">${t}</th>`;
-  const td = (h: string, extra = "") => `<td style="padding:10px 8px;vertical-align:top;border-top:1px solid #e7e5e4;font-size:13px${extra}">${h}</td>`;
-  const table = (list: DiscoveredJob[], head: string) => {
+  // Palette: Antique Green (Pantone 18-5418) and Creole Pink (Pantone 13-1407).
+  const GREEN = "#3E6D69", PINK = "#F5D6CF", PINK_SOFT = "#FBEDE9", INK = "#24302F", MUTED = "#6B7F7C", LINE = "#EAD9D3";
+  const th = (t: string, color: string) =>
+    `<th style="text-align:left;padding:10px 10px;font-size:12px;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;color:${color}">${t}</th>`;
+  const td = (h: string, extra = "") => `<td style="padding:11px 10px;vertical-align:top;border-top:1px solid ${LINE};font-size:13px;color:${INK}${extra}">${h}</td>`;
+  const table = (list: DiscoveredJob[], headBg: string, headText: string) => {
     const rows = list
       .map((j) => {
         const note = opts.ranking?.notes[j.id];
         const why =
-          (note ? `✓ ${esc(note.why)}${note.gap ? `<br><span style="color:#78716c">△ ${esc(note.gap)}</span>` : ""}<br>` : "") +
-          `<span style="color:#78716c">${esc(j.reasons.join("; "))}</span>`;
+          (note ? `<span style="color:${GREEN}">✓ ${esc(note.why)}</span>${note.gap ? `<br><span style="color:${MUTED}">△ ${esc(note.gap)}</span>` : ""}<br>` : "") +
+          `<span style="color:${MUTED};font-size:12px">${esc(j.reasons.join("; "))}</span>`;
         return `<tr>
   ${td(`<b>${esc(j.companyName)}</b>`)}
-  ${td(`<a href="${esc(j.url)}" style="color:#1d4ed8">${esc(j.title)}</a>`, ";min-width:160px")}
+  ${td(`<a href="${esc(j.url)}" style="color:${GREEN};font-weight:600;text-decoration:none;border-bottom:1px solid ${PINK}">${esc(j.title)}</a>`, ";min-width:160px")}
   ${td(esc(j.location || "Not listed"))}
   ${td(esc(j.category), ";white-space:nowrap")}
   ${td(esc(shortDate(j, opts.timeZone)), ";white-space:nowrap")}
-  ${ranked ? td(`<b>${score(j)}</b>`, ";text-align:center") : ""}
+  ${ranked ? td(`<span style="display:inline-block;min-width:30px;text-align:center;background:${PINK};color:${GREEN};font-weight:700;border-radius:999px;padding:2px 8px">${score(j)}</span>`, ";text-align:center") : ""}
   ${td(why, ";min-width:200px")}
 </tr>`;
       })
       .join("\n");
-    return `<table style="border-collapse:collapse;width:100%">
-<tr style="background:${head}">${th("Company")}${th("Role")}${th("Location")}${th("Type")}${th("Posted")}${ranked ? th("Match") : ""}${th("Why")}</tr>
+    return `<table style="border-collapse:collapse;width:100%;border:1px solid ${LINE};border-radius:8px;overflow:hidden">
+<tr style="background:${headBg}">${th("Company", headText)}${th("Role", headText)}${th("Location", headText)}${th("Type", headText)}${th("Posted", headText)}${ranked ? th("Match", headText) : ""}${th("Why", headText)}</tr>
 ${rows}
 </table>`;
   };
-  const sectionHtml = (sec: (typeof sections)[number], head: string) =>
-    `<h3 style="margin:24px 0 8px;font-size:16px">${esc(sec.title)} (${sec.jobs.length + sec.more})</h3>` +
-    (sec.jobs.length ? table(sec.jobs, head) : `<p style="color:#78716c;font-style:italic;margin:0">(none today)</p>`) +
-    (sec.more ? `<p>…and ${sec.more} more.</p>` : "");
+  const sectionHtml = (sec: (typeof sections)[number], headBg: string, headText: string) =>
+    `<h3 style="margin:28px 0 10px;font-size:16px;color:${GREEN}">${esc(sec.title)} (${sec.jobs.length + sec.more})</h3>` +
+    (sec.jobs.length ? table(sec.jobs, headBg, headText) : `<p style="color:${MUTED};font-style:italic;margin:0">(none today)</p>`) +
+    (sec.more ? `<p style="color:${MUTED}">…and ${sec.more} more.</p>` : "");
 
-  const html = `<div style="font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#1c1917;max-width:960px">
-<h2 style="margin:0 0 6px;font-size:20px">Entry-level SWE Jobs — ${esc(day)}</h2>
-<p style="margin:0;color:#57534e"><b style="color:#15803d">${entryJobs.length} entry</b> · ${esc(summary.replace(/^\d+ entry · /, ""))}</p>
-${sectionHtml(sections[0], "#dcfce7")}
-${sectionHtml(sections[1], "#fef9c3")}
-${notes.map((n) => `<p style="color:#78716c;font-size:12px;margin:16px 0 0">${esc(n)}</p>`).join("\n")}
-<p style="color:#a8a29e;font-size:12px">Sent by your Job Search Agent. Screening rules: src/core/discover/classify.ts</p>
+  const html = `<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:14px;color:${INK};max-width:960px;background:#ffffff">
+<div style="height:6px;background:${GREEN};border-radius:3px 3px 0 0"></div>
+<div style="background:${PINK_SOFT};padding:18px 20px;border-radius:0 0 8px 8px">
+<h2 style="margin:0 0 6px;font-size:21px;color:${GREEN}">Entry-level SWE Jobs — ${esc(day)}</h2>
+<p style="margin:0;color:${MUTED}"><b style="color:${GREEN}">${entryJobs.length} entry</b> · ${esc(summary.replace(/^\d+ entry · /, ""))}</p>
+</div>
+${sectionHtml(sections[0], GREEN, "#ffffff")}
+${sectionHtml(sections[1], PINK, GREEN)}
+${notes.map((n) => `<p style="color:${MUTED};font-size:12px;margin:16px 0 0">${esc(n)}</p>`).join("\n")}
+<p style="color:${MUTED};font-size:11px;opacity:.8;margin-top:12px">Sent by your Job Search Agent. Screening rules: src/core/discover/classify.ts</p>
 </div>`;
   return { subject, text, html };
 }
