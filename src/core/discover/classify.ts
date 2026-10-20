@@ -2,6 +2,7 @@
 
 export type Category =
   | "QA/SDET"
+  | "SRE/DevOps"
   | "Full-stack"
   | "Frontend"
   | "Backend"
@@ -23,6 +24,7 @@ const CATEGORY_RULES: [Category, RegExp][] = [
     "QA/SDET",
     /\bsdet\b|software (development )?engineer(s)? in test|software (quality|test) engineer|quality assurance engineer|\bqa engineer|test automation/i,
   ],
+  ["SRE/DevOps", /site reliability engineer|\bsre\b|dev[\s-]?ops engineer|\bdevops\b/i],
   ["Full-stack", /full[\s-]?stack/i],
   ["Frontend", /front[\s-]?end|\bui software/i],
   ["Backend", /back[\s-]?end/i],

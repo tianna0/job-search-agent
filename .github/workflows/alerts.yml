@@ -17,7 +17,8 @@
 # Variables (same page, "Variables" tab), optional:
 #   ALERT_LOCATIONS          default: United States, USA, US (US jobs only)
 #   ALERT_TOP_N              default 8
-#   ALERT_MAX_AGE_DAYS       default 1 (only jobs posted today or yesterday)
+#   ALERT_MAX_AGE_DAYS       default 3 (jobs posted in the last 3 days, never sent twice)
+#   ALERT_MIN_SALARY         default 110000 (drop jobs whose stated pay tops out lower)
 #
 # What was already emailed is committed back to the repo encrypted, as
 # .data/alerts-seen.json.enc (unreadable without STATE_KEY). The plain file is
@@ -114,6 +115,7 @@ jobs:
           ALERT_LOCATIONS: ${{ vars.ALERT_LOCATIONS || 'United States, USA, US' }}
           ALERT_TOP_N: ${{ vars.ALERT_TOP_N }}
           ALERT_MAX_AGE_DAYS: ${{ vars.ALERT_MAX_AGE_DAYS }}
+          ALERT_MIN_SALARY: ${{ vars.ALERT_MIN_SALARY }}
         run: |
           case "${{ inputs.mode }}" in
             dry-run)    npm run alerts -- --dry-run ;;

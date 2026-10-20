@@ -1,6 +1,7 @@
 // Job alerts: decide which found jobs are new, remember what was emailed, and
 // build the email. No I/O here, so it's easy to test.
 import type { DiscoveredJob } from "./discover/discover.ts";
+import { formatSalary } from "./discover/salary.ts";
 
 /** job id -> ISO time it was first emailed */
 export interface SeenJobs {
@@ -29,6 +30,17 @@ export function updateSeen(seen: SeenJobs, emailed: DiscoveredJob[], stillListed
 }
 
 const DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Drops jobs whose stated pay tops out below minSalary (annual USD).
+ * Jobs that don't state pay are kept. minSalary <= 0 turns this off.
+ */
+export function filterBySalary(jobs: DiscoveredJob[], minSalary: number) {
+  if (!(minSalary > 0)) return { kept: jobs, dropped: [] as DiscoveredJob[] };
+  const kept: DiscoveredJob[] = [], dropped: DiscoveredJob[] = [];
+  for (const j of jobs) (j.salary && j.salary.max < minSalary ? dropped : kept).push(j);
+  return { kept, dropped };
+}
 
 /**
  * Sorts jobs by how recently they were posted.
@@ -191,7 +203,7 @@ export function renderEmail(
     if (!sec.jobs.length) textLines.push("(none today)", "");
     for (const j of sec.jobs) {
       textLines.push(`- ${ranked ? `[Match ${score(j)}] ` : ""}${j.companyName}: ${j.title}`);
-      textLines.push(`  ${j.location || "Location not listed"} · ${j.category} · Posted ${shortDate(j, opts.timeZone)}`);
+      textLines.push(`  ${j.location || "Location not listed"} · ${j.category} · Posted ${shortDate(j, opts.timeZone)} · Salary ${formatSalary(j.salary)}`);
       const note = opts.ranking?.notes[j.id];
       if (note) textLines.push(`  Why: ${note.why}`, ...(note.gap ? [`  Gap: ${note.gap}`] : []));
       textLines.push(`  Rule: ${j.reasons.join("; ")}`, `  ${j.url}`, "");
@@ -220,13 +232,14 @@ export function renderEmail(
   ${td(esc(j.location || "Not listed"))}
   ${td(esc(j.category), ";white-space:nowrap")}
   ${td(esc(shortDate(j, opts.timeZone)), ";white-space:nowrap")}
+  ${td(j.salary ? `<b>${esc(formatSalary(j.salary))}</b>` : `<span style="color:${MUTED}">Not stated</span>`, ";white-space:nowrap")}
   ${ranked ? td(`<span style="display:inline-block;min-width:30px;text-align:center;background:${PINK};color:${GREEN};font-weight:700;border-radius:999px;padding:2px 8px">${score(j)}</span>`, ";text-align:center") : ""}
   ${td(why, ";min-width:200px")}
 </tr>`;
       })
       .join("\n");
     return `<table style="border-collapse:collapse;width:100%;border:1px solid ${LINE};border-radius:8px;overflow:hidden">
-<tr style="background:${headBg}">${th("Company", headText)}${th("Role", headText)}${th("Location", headText)}${th("Type", headText)}${th("Posted", headText)}${ranked ? th("Match", headText) : ""}${th("Why", headText)}</tr>
+<tr style="background:${headBg}">${th("Company", headText)}${th("Role", headText)}${th("Location", headText)}${th("Type", headText)}${th("Posted", headText)}${th("Salary", headText)}${ranked ? th("Match", headText) : ""}${th("Why", headText)}</tr>
 ${rows}
 </table>`;
   };

@@ -199,7 +199,7 @@ test("Bloomberg: description comes from the job page's main section", async () =
   assert.deepEqual(r.matched.map((j) => [j.externalId, j.level]), [["17073", "entry"]]);
 });
 
-test("detail budget: title matches are kept and flagged, plain titles counted as not checked", async () => {
+test("detail budget: title matches are flagged, plain titles kept as Maybe (JD not checked)", async () => {
   const positions = [
     { id: 1, name: "Software Engineer, New Grad" },
     { id: 2, name: "Software Engineer" },
@@ -211,7 +211,11 @@ test("detail budget: title matches are kept and flagged, plain titles counted as
   });
   const company: Company = { id: "microsoft", name: "Microsoft", group: "t", starred: false, source: { kind: "microsoft" } };
   const r = await discoverCompany(company, f, { sleep: noSleep, maxDetails: 0 });
-  assert.deepEqual(r.matched.map((j) => [j.title, j.reasons.at(-1)]), [["Software Engineer, New Grad", "description not checked"]]);
+  assert.deepEqual(r.matched.map((j) => [j.title, j.level, j.reasons.at(-1)]), [
+    ["Software Engineer, New Grad", "entry", "description not checked"],
+    ["Software Engineer", "maybe", "JD not checked"],
+    ["Backend Engineer", "maybe", "JD not checked"],
+  ]);
   assert.equal(r.notChecked, 2);
 });
 
@@ -239,4 +243,29 @@ test("board readers pick up posting dates", async () => {
   assert.equal(lv[0].postedAt, "2025-10-09T08:53:20.000Z");
   const ab = await listAshby("x", fake({ jobs: [{ id: "a", title: "SWE", publishedAt: "2026-10-15T00:00:00Z" }] }));
   assert.equal(ab[0].postedAt, "2026-10-15T00:00:00.000Z");
+});
+
+test("429 retries honor Retry-After and per-source backoff", async () => {
+  const waits: number[] = [];
+  let calls = 0;
+  const f = (async () => {
+    calls++;
+    return calls < 3 ? new Response("slow down", { status: 429, headers: { "retry-after": "20" } }) : new Response("{}");
+  }) as unknown as typeof fetch;
+  const http = new Http(f, { backoffMs: [5000, 15000], sleep: async (ms) => { waits.push(ms); } });
+  assert.deepEqual(await http.json("https://x"), {});
+  assert.deepEqual(waits, [20000, 20000], "Retry-After (20 s) beats the shorter 5 s and 15 s backoffs");
+});
+
+test("salary is read from the full description, and Ashby's compensation field counts", async () => {
+  const longJd = "Build things. 0-2 years of experience. " + "x".repeat(5000) + " The base salary range is $138,000 - $192,000 USD.";
+  const gh = fake({ "boards/acme/jobs": () => ({ jobs: [{ id: 1, title: "Software Engineer", location: { name: "NYC" }, absolute_url: "u", content: longJd }] }) });
+  const c1: Company = { id: "acme", name: "Acme", group: "t", starred: false, source: { kind: "greenhouse", slug: "acme" } };
+  const r1 = await discoverCompany(c1, gh, { sleep: noSleep, keepDescription: true });
+  assert.deepEqual(r1.matched[0].salary, { min: 138000, max: 192000 }, "found past the 4,000-character cut");
+
+  const ab = fake({ "job-board/acme": () => ({ jobs: [{ id: "a", title: "Software Engineer, New Grad", location: "NYC", jobUrl: "u", descriptionPlain: "Join us.", compensation: { compensationTierSummary: "$120K – $150K • Offers Equity" } }] }) });
+  const c2: Company = { id: "acme", name: "Acme", group: "t", starred: false, source: { kind: "ashby", slug: "acme" } };
+  const r2 = await discoverCompany(c2, ab, { sleep: noSleep });
+  assert.deepEqual(r2.matched[0].salary, { min: 120000, max: 150000 });
 });

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "local": "node --env-file=.env --import tsx src/node/server.ts",
-    "test": "node --import tsx --test test/core.test.ts test/classify.test.ts test/discover.test.ts test/sources.test.ts test/agent.test.ts test/demo.test.ts test/alerts.test.ts",
+    "test": "node --import tsx --test test/core.test.ts test/classify.test.ts test/discover.test.ts test/sources.test.ts test/agent.test.ts test/demo.test.ts test/alerts.test.ts test/salary.test.ts",
     "check-companies": "node --import tsx src/node/check-companies.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "dev": "wrangler dev",

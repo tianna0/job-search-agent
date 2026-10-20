@@ -65,7 +65,7 @@ export async function listLever(slug: string, doFetch: typeof fetch): Promise<Ra
 export async function listAshby(slug: string, doFetch: typeof fetch): Promise<RawJob[]> {
   const data = await getJson(
     doFetch,
-    `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=false`
+    `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`
   );
   return (data.jobs ?? [])
     .filter((j: any) => j.isListed !== false)
@@ -74,7 +74,13 @@ export async function listAshby(slug: string, doFetch: typeof fetch): Promise<Ra
       title: String(j.title ?? ""),
       location: String(j.location ?? ""),
       url: String(j.jobUrl ?? ""),
-      description: String(j.descriptionPlain ?? htmlToText(String(j.descriptionHtml ?? ""))),
+      description:
+        String(j.descriptionPlain ?? htmlToText(String(j.descriptionHtml ?? ""))) +
+        // Ashby keeps pay in a separate field; add it so the salary reader sees it.
+        [j.compensation?.scrapeableCompensationSalarySummary, j.compensation?.compensationTierSummary]
+          .filter((x) => typeof x === "string" && x)
+          .map((x) => `\nCompensation: ${x}`)
+          .join(""),
       postedAt: firstDate(j.publishedAt, j.publishedDate),
     }));
 }

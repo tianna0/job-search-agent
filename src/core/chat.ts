@@ -25,7 +25,7 @@ To call a tool, reply with ONLY a JSON object: {"tool": "<name>", "args": {...}}
 When you have the answer, reply with ONLY: {"reply": "<message for the user>"}
 
 Tools:
-- list_jobs(level?: "entry"|"maybe", company?: string, category?: "SWE"|"SDE"|"Backend"|"Frontend"|"Full-stack"|"QA/SDET", query?: string, new_only?: boolean, limit?: number)
+- list_jobs(level?: "entry"|"maybe", company?: string, category?: "SWE"|"SDE"|"Backend"|"Frontend"|"Full-stack"|"QA/SDET"|"SRE/DevOps", query?: string, new_only?: boolean, limit?: number)
   Jobs found by scans that are not in the tracker yet. new_only = first seen in the last ${NEW_DAYS} days.
 - list_applications(status?: ${STATUSES.map((s) => `"${s}"`).join("|")})
   Jobs in the tracker, with fit scores.

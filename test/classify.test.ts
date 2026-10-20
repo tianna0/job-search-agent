@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { categorize, classify, yearsMentions } from "../src/core/discover/classify.ts";
 
-test("categories follow the six title groups", () => {
+test("categories follow the seven title groups", () => {
   const cases: [string, string | null][] = [
     ["Full Stack Engineer", "Full-stack"],
     ["Fullstack Developer", "Full-stack"],
@@ -17,6 +17,10 @@ test("categories follow the six title groups", () => {
     ["Quality Assurance Engineer", "QA/SDET"],
     ["QA Engineer II", "QA/SDET"],
     ["Test Automation Engineer", "QA/SDET"],
+    ["Site Reliability Engineer, Apple Data Platform", "SRE/DevOps"],
+    ["SRE II", "SRE/DevOps"],
+    ["DevOps Engineer", "SRE/DevOps"],
+    ["Software Engineer, SRE Tooling", "SRE/DevOps"],
     ["Software Development Engineer I", "SDE"],
     ["SDE II", "SDE"],
     ["Software Developer", "SDE"],

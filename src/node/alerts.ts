@@ -12,10 +12,13 @@
 // The resume comes from RESUME_FILE (.pdf or .txt), else resume.pdf / resume.txt in
 // the project folder, else the one you uploaded in the local app (npm run local).
 //
-// Only newly posted jobs are sent: ALERT_MAX_AGE_DAYS (default 1) keeps jobs posted
-// today or yesterday. Sites that don't give a date count as new when a job first
+// Only newly posted jobs are sent: ALERT_MAX_AGE_DAYS (default 3) keeps jobs posted
+// in the last 3 days (a job is never sent twice). Sites that don't give a date count as new when a job first
 // shows up; on the very first run those are remembered without being sent.
 // ALERT_MAX_AGE_DAYS=0 turns this off.
+//
+// Pay: jobs whose stated range tops out below ALERT_MIN_SALARY (default 110000,
+// annual USD) are dropped; jobs that don't state pay are kept. 0 turns it off.
 //
 // Settings live in .env (see .env.example). What was already emailed is kept in
 // .data/alerts-seen.json; delete that file to start over.
@@ -23,7 +26,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { findCompany, readableCompanyIds } from "../core/discover/companies.ts";
 import { discoverCompany, type DiscoveredJob } from "../core/discover/discover.ts";
-import { filterByLocation, pickNewJobs, renderEmail, splitByAge, updateSeen, type SeenJobs } from "../core/alerts.ts";
+import { filterByLocation, filterBySalary, pickNewJobs, renderEmail, splitByAge, updateSeen, type SeenJobs } from "../core/alerts.ts";
 import { rankJobs, type Ranking } from "../core/rank.ts";
 import { mailConfig, sendMail } from "./mailer.ts";
 import { workersAi, workersAiEmbed } from "./workers-ai.ts";
@@ -122,12 +125,15 @@ async function main() {
   }
 
   const locations = (process.env.ALERT_LOCATIONS ?? "").split(",");
-  const relevant = filterByLocation(matched, locations);
+  const inLocations = filterByLocation(matched, locations);
+  const minSalary = numberSetting(process.env.ALERT_MIN_SALARY, 110000);
+  const { kept: relevant, dropped: underpaid } = filterBySalary(inLocations, minSalary);
+  if (underpaid.length) console.log(`${underpaid.length} jobs dropped: stated pay tops out under $${minSalary.toLocaleString("en-US")}.`);
   const previous = loadSeen();
   const firstRun = previous === null;
   const seen = previous ?? { jobs: {} };
-  const ageSetting = (process.env.ALERT_MAX_AGE_DAYS || "1").trim().toLowerCase();
-  const maxAgeDays = ageSetting === "off" ? 0 : numberSetting(ageSetting, 1);
+  const ageSetting = (process.env.ALERT_MAX_AGE_DAYS || "3").trim().toLowerCase();
+  const maxAgeDays = ageSetting === "off" ? 0 : numberSetting(ageSetting, 3);
   const { recent, old, undated } = splitByAge(relevant, maxAgeDays);
   // Undated jobs: new to us = newly posted, except on the first run, when every
   // open job is new to us. Then they're only remembered.

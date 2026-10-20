@@ -37,6 +37,8 @@ export type SourceConfig =
 export interface Source {
   /** Pause between requests for this site, in ms. */
   delayMs: number;
+  /** Waits before retrying a rate-limited (429) request; defaults to Http's. */
+  backoffMs?: number[];
   list(http: Http): Promise<ListedJob[]>;
   detail?(job: { externalId: string; url: string; detailRef?: string }, http: Http): Promise<string | null>;
 }
@@ -155,7 +157,8 @@ const amazon: Source = {
 // ---------- Microsoft (Eightfold "pcsx" API; rate-limited, so slow) ----------
 
 const microsoft: Source = {
-  delayMs: 1500,
+  delayMs: 2500,
+  backoffMs: [5000, 15000, 30000, 60000],
   async list(http) {
     const out: ListedJob[] = [];
     const PAGE = 10; // fixed by the site
@@ -164,7 +167,14 @@ const microsoft: Source = {
       for (let page = 0; page < MAX_PAGES; page++) {
         const url = `https://apply.careers.microsoft.com/api/pcsx/search?domain=microsoft.com` +
           `&query=${encodeURIComponent(q)}&location=&start=${page * PAGE}`;
-        const res = await http.json(url);
+        let res: any;
+        try {
+          res = await http.json(url);
+        } catch (err) {
+          // Still rate-limited after every retry: keep what we already have.
+          if (out.length) return dedupe(out);
+          throw err;
+        }
         if (!res) return dedupe(out);
         const data = res.data ?? {};
         const positions: any[] = data.positions ?? [];

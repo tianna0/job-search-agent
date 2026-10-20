@@ -251,3 +251,27 @@ test("filterByLocation: Indian and Canadian codes aren't US states", () => {
     ["indy", "sea", "sea-usa", "wd", "mixed", "both"]
   );
 });
+
+// ---------- pay ----------
+import { filterBySalary } from "../src/core/alerts.ts";
+
+test("filterBySalary drops ranges topping out under the minimum, keeps unstated pay", () => {
+  const jobs = [
+    job("low", { salary: { min: 80000, max: 105000 } }),
+    job("straddle", { salary: { min: 95000, max: 130000 } }),
+    job("high", { salary: { min: 150000, max: 200000 } }),
+    job("unstated"),
+  ];
+  const r = filterBySalary(jobs, 110000);
+  assert.deepEqual(r.kept.map((j) => j.id), ["straddle", "high", "unstated"]);
+  assert.deepEqual(r.dropped.map((j) => j.id), ["low"]);
+  assert.equal(filterBySalary(jobs, 0).kept.length, 4, "0 = off");
+});
+
+test("email has a Salary column", () => {
+  const email = renderEmail([job("a", { salary: { min: 138000, max: 192000 } }), job("b")], { date: new Date("2026-10-19T18:00:00Z") });
+  assert.match(email.html, /<th[^>]*>Salary<\/th>/);
+  assert.match(email.html, /\$138k–\$192k/);
+  assert.match(email.text, /Salary \$138k–\$192k/);
+  assert.match(email.text, /Salary Not stated/);
+});

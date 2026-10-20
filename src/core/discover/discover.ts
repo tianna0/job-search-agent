@@ -2,6 +2,7 @@ import { classify, type Category, type Classification } from "./classify.ts";
 import { Http } from "./http.ts";
 import { makeSource, type ListedJob } from "./sources.ts";
 import type { Company } from "./companies.ts";
+import { parseSalary, type Salary } from "./salary.ts";
 
 export interface DiscoveredJob {
   id: string; // `${company}:${externalId}`
@@ -20,6 +21,8 @@ export interface DiscoveredJob {
   description?: string;
   /** When the company posted it (ISO), if the site says. */
   postedAt?: string;
+  /** Annual USD pay range stated in the description, if any. */
+  salary?: Salary;
 }
 
 export interface DiscoverResult {
@@ -57,6 +60,7 @@ export async function discoverCompany(
   const source = sourceOf(company);
   const http = new Http(doFetch, {
     delayMs: source.delayMs,
+    backoffMs: source.backoffMs,
     maxRequests: opts.maxRequests ?? 150,
     sleep: opts.sleep,
   });
@@ -82,6 +86,11 @@ export async function discoverCompany(
       reasons: extra ? [...c.reasons, extra] : c.reasons,
       firstSeen: now,
       ...(j.postedAt ? { postedAt: j.postedAt } : {}),
+      ...(() => {
+        // Read the pay range from the full text, before it's cut to 4,000 characters.
+        const salary = text ? parseSalary(text) : undefined;
+        return salary ? { salary } : {};
+      })(),
       ...(opts.keepDescription && text ? { description: text.slice(0, 4000) } : {}),
     });
   };
@@ -125,9 +134,13 @@ export async function discoverCompany(
       if (desc !== null) fetched++;
     }
     if (desc === null) {
-      // Couldn't read the description: keep title-level matches, flagged.
+      // Couldn't read the description: keep title-level matches, flagged; a plain
+      // software title is still worth a look, as a Maybe.
       if (byTitle.level === "entry" || byTitle.level === "maybe") keep(job, byTitle, "description not checked");
-      else notChecked++;
+      else {
+        notChecked++;
+        keep(job, { ...byTitle, level: "maybe", reasons: ["JD not checked"] });
+      }
       continue;
     }
     const c = classify(job.title, desc);

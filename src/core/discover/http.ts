@@ -11,6 +11,8 @@ export interface HttpOptions {
   maxRequests?: number;
   /** Per-request timeout in ms. */
   timeoutMs?: number;
+  /** Waits before each retry on 429/503 (a Retry-After header, up to 60 s, wins if longer). */
+  backoffMs?: number[];
   /** Override for tests (skips real waiting). */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -25,6 +27,7 @@ export class Http {
   private maxRequests: number;
   private timeoutMs: number;
   private sleep: (ms: number) => Promise<void>;
+  private backoffMs: number[];
   private last = 0;
   used = 0;
 
@@ -36,6 +39,7 @@ export class Http {
     this.maxRequests = opts.maxRequests ?? 200;
     this.timeoutMs = opts.timeoutMs ?? 25000;
     this.sleep = opts.sleep ?? realSleep;
+    this.backoffMs = opts.backoffMs ?? [3000, 8000];
   }
 
   get exhausted(): boolean {
@@ -49,7 +53,7 @@ export class Http {
 
   /** Returns the response, or null when the request budget is spent. Throws on network errors and non-OK status. */
   async request(url: string, init: RequestInit = {}): Promise<Response | null> {
-    const backoff = [3000, 8000];
+    const backoff = this.backoffMs;
     for (let attempt = 0; ; attempt++) {
       if (this.exhausted) return null;
       const wait = this.last + this.delayMs - Date.now();
@@ -66,7 +70,9 @@ export class Http {
 
       const res = await this.doFetch(url, { ...init, headers, signal, redirect: "follow" });
       if ((res.status === 429 || res.status === 503) && attempt < backoff.length) {
-        await this.sleep(backoff[attempt]);
+        const retryAfter = Number(res.headers.get("retry-after"));
+        const hinted = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 60) * 1000 : 0;
+        await this.sleep(Math.max(backoff[attempt], hinted));
         continue;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
