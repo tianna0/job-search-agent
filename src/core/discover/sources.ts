@@ -71,7 +71,7 @@ function dedupe(jobs: ListedJob[]): ListedJob[] {
   return jobs.filter((j) => (seen.has(j.externalId) ? false : (seen.add(j.externalId), true)));
 }
 
-// ---------- Workday (Nvidia, Adobe, Salesforce, Snap) ----------
+// ---------- Workday (Nvidia, Adobe, Salesforce, Snap, Intel) ----------
 
 function workday(c: { host: string; tenant: string; site: string }): Source {
   const api = `https://${c.host}/wday/cxs/${c.tenant}/${c.site}`;

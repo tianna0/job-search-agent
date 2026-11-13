@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { categorize, classify, yearsMentions } from "../src/core/discover/classify.ts";
 
-test("categories follow the seven title groups", () => {
+test("categories follow the eight title groups", () => {
   const cases: [string, string | null][] = [
     ["Full Stack Engineer", "Full-stack"],
     ["Fullstack Developer", "Full-stack"],
@@ -26,6 +26,16 @@ test("categories follow the seven title groups", () => {
     ["Software Developer", "SDE"],
     ["Software Developer - Trading Systems", "SDE"],
     ["Software Engineer, New Grad", "SWE"],
+    ["Systems Test Engineer, End-to-End Validation | Consumer Devices", "QA/SDET"],
+    ["Software QA Engineer", "QA/SDET"],
+    ["Test Engineer", "QA/SDET"],
+    ["Software Validation Engineer", "QA/SDET"],
+    ["Platform Engineer", "Platform/Infra"],
+    ["Infrastructure Engineer, Compute", "Platform/Infra"],
+    ["Production Engineer", "Platform/Infra"],
+    ["Cloud Engineer", "Platform/Infra"],
+    ["Software Engineer, Infrastructure", "SWE"],
+    ["Member of Technical Staff", null],
     ["Data Scientist", null],
     ["Product Manager", null],
   ];
@@ -97,8 +107,10 @@ test("plain titles are decided by the job description", () => {
   assert.equal(classify("Software Engineer", "0-1 years of professional experience").level, "entry");
   assert.equal(classify("Software Engineer", "No prior experience required.").level, "entry");
   assert.equal(classify("Software Engineer", "2 years of experience building services").level, "entry");
-  assert.equal(classify("Software Engineer", "1-3 years of relevant experience").level, "maybe");
-  assert.equal(classify("Software Engineer", "3+ years of experience required").level, "excluded");
+  assert.equal(classify("Software Engineer", "1-3 years of relevant experience").level, "entry");
+  assert.equal(classify("Software Engineer", "3+ years of experience required").level, "maybe");
+  assert.equal(classify("Software Engineer", "4+ years of experience required").level, "excluded");
+  assert.equal(classify("Software Engineer", "2-4 years of experience").level, "maybe");
   assert.equal(classify("Software Engineer", "5 years of industry experience").level, "excluded");
 });
 
@@ -111,8 +123,32 @@ test("a plain title whose JD doesn't state years is a Maybe", () => {
   assert.equal(classify("Senior Software Engineer", "Build APIs.").level, "excluded");
 });
 
-test("a 3+ year requirement overrides an entry-level title", () => {
+test("a 3 year requirement demotes an entry-level title; 4+ excludes it", () => {
+  assert.equal(classify("Software Engineer I", "Requires 3+ years of experience").level, "maybe");
   assert.equal(classify("Software Engineer I", "Requires 4+ years of experience").level, "excluded");
+});
+
+test("years under preferred qualifications never exclude", () => {
+  const jd = [
+    "Minimum Qualifications:",
+    "BS in Computer Science.",
+    "1+ years of experience with Python.",
+    "Preferred Qualifications:",
+    "MS with 6+ years of experience in distributed systems.",
+    "Benefits",
+    "Health insurance.",
+  ].join("\n");
+  const c = classify("Software Engineer", jd);
+  assert.equal(c.level, "entry");
+  assert.deepEqual(c.reasons, ["JD: 1+ years"]);
+  assert.equal(classify("Software Engineer", "Nice to have:\n7+ years of experience with Kubernetes").level, "maybe");
+  assert.equal(classify("Software Engineer", "2+ years of experience. 8+ years of experience is a plus.").level, "entry");
+  assert.equal(classify("Software Engineer", "Bonus points\nActive security clearance").level, "maybe");
+});
+
+test("years under minimum qualifications still exclude", () => {
+  const jd = "Preferred qualifications\nMS degree\nMinimum qualifications\n6+ years of experience in software quality engineering.\nUS Citizenship required.";
+  assert.equal(classify("Software QA Engineer", jd).level, "excluded");
 });
 
 test("years that are not about experience are ignored", () => {
@@ -135,6 +171,6 @@ test("equal-opportunity wording about citizenship status is not a requirement", 
 });
 
 test("a JD range demotes an entry title only when the title is not entry", () => {
-  assert.equal(classify("Software Engineer", "1-3 years of experience").level, "maybe");
-  assert.equal(classify("Software Engineer I", "1-3 years of experience").level, "entry");
+  assert.equal(classify("Software Engineer", "2-5 years of experience").level, "maybe");
+  assert.equal(classify("Software Engineer I", "2-5 years of experience").level, "entry");
 });

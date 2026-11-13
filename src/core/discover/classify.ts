@@ -3,6 +3,7 @@
 export type Category =
   | "QA/SDET"
   | "SRE/DevOps"
+  | "Platform/Infra"
   | "Full-stack"
   | "Frontend"
   | "Backend"
@@ -22,9 +23,12 @@ export interface Classification {
 const CATEGORY_RULES: [Category, RegExp][] = [
   [
     "QA/SDET",
-    /\bsdet\b|software (development )?engineer(s)? in test|software (quality|test) engineer|quality assurance engineer|\bqa engineer|test automation/i,
+    /\bsdet\b|software (development )?engineer(s)? in test|software (quality|test) engineer|quality assurance engineer|\bqa engineer|test automation|\btest engineer|\b(software|systems?|qa) validation engineer/i,
   ],
   ["SRE/DevOps", /site reliability engineer|\bsre\b|dev[\s-]?ops engineer|\bdevops\b/i],
+  // Platform and infrastructure roles, e.g. "Platform Engineer", "Infrastructure Engineer, Compute".
+  // "Member of Technical Staff" on its own is deliberately not a category.
+  ["Platform/Infra", /\bplatform engineer|\binfrastructure engineer|\bproduction engineer|\bcloud engineer/i],
   ["Full-stack", /full[\s-]?stack/i],
   ["Frontend", /front[\s-]?end|\bui software/i],
   ["Backend", /back[\s-]?end/i],
@@ -75,6 +79,41 @@ const JD_NO_EXPERIENCE =
 
 const JD_ENTRY_WORDS = /new[\s-]?grad|new college grad|university grad|recent grad|early career/i;
 
+// Section headings. Only the required part of a JD can exclude a job; what's
+// under "Preferred qualifications" / "Nice to have" never does.
+const PREFERRED_HEADING =
+  /^\W*(preferred|desired|bonus|nice[\s-]to[\s-]haves?|pluses|extra credit|ideal(ly)?|it'?s? (would be )?(a plus|great|nice) if|we'?d love|even better|you might also have|additional (preferred )?qualifications)\b/i;
+const OTHER_HEADING =
+  /^\W*(minimum|basic|required|requirements|qualifications|what you('ll)? (need|bring)|who you are|you (have|bring|are)|about|responsibilities|what you('ll)? do|the role|benefits|compensation|pay|salary|why join|our|we offer|perks|location)\b/i;
+// A sentence that marks itself optional: "5+ years is a plus", "ideally 4 years".
+const OPTIONAL_SENTENCE = /\b(preferred|is a plus|a plus\b|nice to have|bonus|ideally|desired|would be great)\b/i;
+
+/**
+ * The part of a JD that states requirements: everything except preferred /
+ * nice-to-have sections and sentences that call themselves optional.
+ * Headings are recognized as short lines; a JD with no headings is used whole.
+ */
+export function requiredText(text: string): string {
+  const out: string[] = [];
+  let preferred = false;
+  for (const line of text.split(/\n/)) {
+    const short = line.trim().length <= 80;
+    if (short && PREFERRED_HEADING.test(line)) {
+      preferred = true;
+      continue;
+    }
+    if (short && OTHER_HEADING.test(line)) preferred = false;
+    if (preferred) continue;
+    // Drop sentences that say they're optional, keep the rest of the line.
+    const kept = line
+      .split(/(?<=[.;!?])\s+/)
+      .filter((sentence) => !OPTIONAL_SENTENCE.test(sentence))
+      .join(" ");
+    if (kept.trim()) out.push(kept);
+  }
+  return out.join("\n");
+}
+
 interface YearsMention {
   lo: number;
   hi: number | null;
@@ -93,21 +132,72 @@ export function yearsMentions(text: string): YearsMention[] {
   return out;
 }
 
-export function classify(title: string, description = ""): Classification {
+// Experience thresholds (years, the lower bound a JD asks for).
+// The target is 0-3 years of required experience.
+export const MAX_YEARS = 3;
+const EXCLUDE_YEARS = MAX_YEARS + 1; // a 4+ year minimum is out of range
+const MAYBE_YEARS = 3; // exactly 3 years: in range, but at the top of it
+
+/** The largest minimum the required part of a JD states, or undefined if it states none. */
+export function requiredYears(description: string): number | undefined {
+  const lows = yearsMentions(requiredText(description)).map((y) => y.lo);
+  return lows.length ? Math.max(...lows) : undefined;
+}
+
+/**
+ * The lines of a JD that mention years of experience, each under the heading it
+ * appears in, so a reader can tell required from preferred. Short enough to send
+ * to a model cheaply. Empty when the JD never mentions years.
+ */
+export function experienceExcerpt(description: string, maxChars = 1500): string {
+  const out: string[] = [];
+  let heading = "";
+  let lastHeading = "";
+  for (const line of description.split(/\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    if (t.length <= 80 && (PREFERRED_HEADING.test(t) || OTHER_HEADING.test(t) || /:$/.test(t))) {
+      heading = t;
+      continue;
+    }
+    if (!yearsMentions(t).length) continue;
+    if (heading && heading !== lastHeading) {
+      out.push(`[${heading}]`);
+      lastHeading = heading;
+    }
+    out.push(`- ${t.slice(0, 300)}`);
+  }
+  return out.join("\n").slice(0, maxChars);
+}
+
+export interface ClassifyOptions {
+  /**
+   * A required minimum of this many years or more excludes the job (default 4).
+   * Job alerts set it higher so only clear misses are dropped by rule and the
+   * rest get a closer read later.
+   */
+  excludeYears?: number;
+}
+
+export function classify(title: string, description = "", opts: ClassifyOptions = {}): Classification {
+  const excludeYears = opts.excludeYears ?? EXCLUDE_YEARS;
   const reasons: string[] = [];
   const category = categorize(title);
   const t = normalizeTitle(title);
+  const required = description ? requiredText(description) : "";
 
   if (TITLE_EXCLUDE.test(t)) {
     const hit = t.match(TITLE_EXCLUDE)![0];
     return { category, level: "excluded", reasons: [`title has "${hit}"`] };
   }
-  if (description && JD_CLEARANCE.test(description)) {
+  if (required && JD_CLEARANCE.test(required)) {
     return { category, level: "excluded", reasons: ["clearance or citizenship requirement"] };
   }
 
   let entry = false;
   let maybe = false;
+  // A 3-year minimum makes a job a Maybe even when the title says entry level.
+  let needsYears = false;
 
   if (TITLE_ENTRY.test(t)) {
     entry = true;
@@ -117,11 +207,14 @@ export function classify(title: string, description = ""): Classification {
     reasons.push(`title: ${t.match(TITLE_MAYBE)![0].trim()}`);
   }
 
-  for (const y of yearsMentions(description)) {
-    if (y.lo >= 3) {
+  for (const y of yearsMentions(required)) {
+    if (y.lo >= excludeYears) {
       return { category, level: "excluded", reasons: [`${y.lo}+ years of experience required`] };
     }
-    if (y.hi !== null && y.hi >= 3) {
+    if (y.lo >= MAYBE_YEARS) {
+      needsYears = true;
+      reasons.push(`JD: ${y.lo}${y.hi !== null ? "-" + y.hi : "+"} years`);
+    } else if (y.hi !== null && y.hi > MAX_YEARS) {
       maybe = true;
       reasons.push(`JD: ${y.lo}-${y.hi} years`);
     } else {
@@ -129,17 +222,19 @@ export function classify(title: string, description = ""): Classification {
       reasons.push(`JD: ${y.lo}${y.hi !== null ? "-" + y.hi : "+"} years`);
     }
   }
-  if (JD_NO_EXPERIENCE.test(description)) {
+  if (JD_NO_EXPERIENCE.test(required)) {
     entry = true;
     reasons.push("JD: no experience required");
   }
-  if (!entry && !maybe && JD_ENTRY_WORDS.test(description)) {
+  if (!entry && !maybe && !needsYears && JD_ENTRY_WORDS.test(description)) {
     entry = true;
     reasons.push("JD mentions new grads or early career");
   }
 
   // A JD range like "1-3 years" demotes an otherwise entry-level title.
-  let level: Level = maybe && !TITLE_ENTRY.test(t) ? "maybe" : entry ? "entry" : maybe ? "maybe" : "unknown";
+  let level: Level = needsYears
+    ? "maybe"
+    : maybe && !TITLE_ENTRY.test(t) ? "maybe" : entry ? "entry" : maybe ? "maybe" : "unknown";
   // A plain title whose description we read but that never says how much
   // experience it wants: worth a look, so it's a Maybe. Without a description
   // (title-only screening) it stays unknown so the description gets fetched.

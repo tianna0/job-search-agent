@@ -44,7 +44,7 @@ function fakeFetch(map: Record<string, unknown>): typeof fetch {
 test("every company has a unique id and a platform or none", () => {
   const ids = new Set(COMPANIES.map((c) => c.id));
   assert.equal(ids.size, COMPANIES.length);
-  assert.equal(COMPANIES.length, 40);
+  assert.equal(COMPANIES.length, 41);
   for (const c of COMPANIES) {
     if (c.source === null) assert.ok(c.note, `${c.id} needs a reason it can't be read`);
   }
@@ -104,10 +104,10 @@ function setup(map: Record<string, unknown>, state: Partial<TrackerState> = {}) 
   return { req, get: () => current };
 }
 
-test("GET companies lists all 40 with readability", async () => {
+test("GET companies lists all 41 with readability", async () => {
   const t = setup({});
   const list = (await (await t.req("companies")).json()) as any[];
-  assert.equal(list.length, 40);
+  assert.equal(list.length, 41);
   assert.equal(list.find((c) => c.id === "google").readable, false);
   assert.equal(list.find((c) => c.id === "anthropic").readable, true);
 });

@@ -17,6 +17,12 @@
 // shows up; on the very first run those are remembered without being sent.
 // ALERT_MAX_AGE_DAYS=0 turns this off.
 //
+// Experience: the target is 0-3 years required. The screening rules drop jobs that
+// clearly require 6+ years; for the jobs about to be emailed, Workers AI reads the
+// JD's experience lines and drops those requiring more than 3 years (preferred
+// experience doesn't count). Without Workers AI, the rule-based count decides.
+// ALERT_AI_YEARS=off skips the model.
+//
 // Pay: jobs whose stated range tops out below ALERT_MIN_SALARY (default 110000,
 // annual USD) are dropped; jobs that don't state pay are kept. 0 turns it off.
 //
@@ -27,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { findCompany, readableCompanyIds } from "../core/discover/companies.ts";
 import { discoverCompany, type DiscoveredJob } from "../core/discover/discover.ts";
 import { filterByLocation, filterBySalary, pickNewJobs, renderEmail, splitByAge, updateSeen, type SeenJobs } from "../core/alerts.ts";
+import { reviewExperience } from "../core/experience.ts";
 import { rankJobs, type Ranking } from "../core/rank.ts";
 import { mailConfig, sendMail } from "./mailer.ts";
 import { workersAi, workersAiEmbed } from "./workers-ai.ts";
@@ -35,6 +42,8 @@ const args = new Set(process.argv.slice(2));
 const DATA_DIR = new URL("../../.data/", import.meta.url);
 const SEEN_FILE = new URL("alerts-seen.json", DATA_DIR);
 const APP_STATE = new URL("state.json", DATA_DIR);
+/** Jobs requiring this many years or more are dropped by rule, before the model's read. */
+const RULE_EXCLUDE_YEARS = 6;
 
 /** A number from a setting; empty or unset (GitHub passes unset variables as "") means the default. */
 function numberSetting(value: string | undefined, fallback: number): number {
@@ -111,7 +120,7 @@ async function main() {
   for (const id of ids) {
     const company = findCompany(id)!;
     try {
-      const r = await discoverCompany(company, fetch, { keepDescription: true });
+      const r = await discoverCompany(company, fetch, { keepDescription: true, excludeYears: RULE_EXCLUDE_YEARS });
       matched.push(...r.matched);
       const dated = r.matched.filter((j) => j.postedAt).length;
       console.log(`  ${company.name.padEnd(12)} ${r.matched.length} match (${r.listed} listed)${r.matched.length ? `, ${dated} with a posting date` : ""}`);
@@ -139,13 +148,22 @@ async function main() {
   // open job is new to us. Then they're only remembered.
   const candidates = maxAgeDays > 0 && !firstRun ? [...recent, ...undated] : recent;
   const silent = maxAgeDays > 0 && firstRun ? pickNewJobs(undated, seen) : [];
-  const toSend = args.has("--all") ? relevant : pickNewJobs(candidates, seen);
+  const unchecked = args.has("--all") ? relevant : pickNewJobs(candidates, seen);
+  const review = await reviewExperience(unchecked, process.env.ALERT_AI_YEARS === "off" ? null : workersAi);
+  const toSend = review.kept;
   const where = locations.some((l) => l.trim()) ? " in your locations" : "";
   if (maxAgeDays > 0) {
     console.log(`${relevant.length} matching jobs${where}: ${recent.length} posted in the last ${maxAgeDays} day(s), ${old.length} older, ${undated.length} with no date.`);
     if (silent.length) console.log(`First run: ${silent.length} jobs with no posting date are remembered, not sent.`);
   } else {
     console.log(`${relevant.length} matching jobs${where}.`);
+  }
+  if (unchecked.length) {
+    console.log(
+      `Experience check: ${review.dropped.length} of ${unchecked.length} dropped for requiring more than 3 years` +
+        (review.checked ? ` (Workers AI read ${review.checked})` : "") +
+        (review.error ? `; rule-based count used (${review.error})` : "") + "."
+    );
   }
   console.log(`${toSend.length} to email.`);
 

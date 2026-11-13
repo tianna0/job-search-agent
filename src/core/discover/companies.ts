@@ -75,6 +75,7 @@ export const COMPANIES: Company[] = [
   c("adobe", "Adobe", "Enterprise / infra", false, wd("adobe.wd5.myworkdayjobs.com", "adobe", "external_experienced")),
   c("salesforce", "Salesforce", "Enterprise / infra", false, wd("salesforce.wd12.myworkdayjobs.com", "salesforce", "External_Career_Site")),
   c("cloudflare", "Cloudflare", "Enterprise / infra", true, gh("cloudflare")),
+  c("intel", "Intel", "Enterprise / infra", false, wd("intel.wd1.myworkdayjobs.com", "intel", "External")),
 ];
 
 export function findCompany(id: string): Company | undefined {
