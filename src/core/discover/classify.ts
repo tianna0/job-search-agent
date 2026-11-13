@@ -79,6 +79,41 @@ const JD_NO_EXPERIENCE =
 
 const JD_ENTRY_WORDS = /new[\s-]?grad|new college grad|university grad|recent grad|early career/i;
 
+// Section headings. Only the required part of a JD can exclude a job; what's
+// under "Preferred qualifications" / "Nice to have" never does.
+const PREFERRED_HEADING =
+  /^\W*(preferred|desired|bonus|nice[\s-]to[\s-]haves?|pluses|extra credit|ideal(ly)?|it'?s? (would be )?(a plus|great|nice) if|we'?d love|even better|you might also have|additional (preferred )?qualifications)\b/i;
+const OTHER_HEADING =
+  /^\W*(minimum|basic|required|requirements|qualifications|what you('ll)? (need|bring)|who you are|you (have|bring|are)|about|responsibilities|what you('ll)? do|the role|benefits|compensation|pay|salary|why join|our|we offer|perks|location)\b/i;
+// A sentence that marks itself optional: "5+ years is a plus", "ideally 4 years".
+const OPTIONAL_SENTENCE = /\b(preferred|is a plus|a plus\b|nice to have|bonus|ideally|desired|would be great)\b/i;
+
+/**
+ * The part of a JD that states requirements: everything except preferred /
+ * nice-to-have sections and sentences that call themselves optional.
+ * Headings are recognized as short lines; a JD with no headings is used whole.
+ */
+export function requiredText(text: string): string {
+  const out: string[] = [];
+  let preferred = false;
+  for (const line of text.split(/\n/)) {
+    const short = line.trim().length <= 80;
+    if (short && PREFERRED_HEADING.test(line)) {
+      preferred = true;
+      continue;
+    }
+    if (short && OTHER_HEADING.test(line)) preferred = false;
+    if (preferred) continue;
+    // Drop sentences that say they're optional, keep the rest of the line.
+    const kept = line
+      .split(/(?<=[.;!?])\s+/)
+      .filter((sentence) => !OPTIONAL_SENTENCE.test(sentence))
+      .join(" ");
+    if (kept.trim()) out.push(kept);
+  }
+  return out.join("\n");
+}
+
 interface YearsMention {
   lo: number;
   hi: number | null;
@@ -97,21 +132,28 @@ export function yearsMentions(text: string): YearsMention[] {
   return out;
 }
 
+// Experience thresholds (years, the lower bound a JD asks for).
+const EXCLUDE_YEARS = 5; // 5+ years: not early career
+const MAYBE_YEARS = 3; // 3-4 years: worth a look
+
 export function classify(title: string, description = ""): Classification {
   const reasons: string[] = [];
   const category = categorize(title);
   const t = normalizeTitle(title);
+  const required = description ? requiredText(description) : "";
 
   if (TITLE_EXCLUDE.test(t)) {
     const hit = t.match(TITLE_EXCLUDE)![0];
     return { category, level: "excluded", reasons: [`title has "${hit}"`] };
   }
-  if (description && JD_CLEARANCE.test(description)) {
+  if (required && JD_CLEARANCE.test(required)) {
     return { category, level: "excluded", reasons: ["clearance or citizenship requirement"] };
   }
 
   let entry = false;
   let maybe = false;
+  // A 3-4 year minimum makes a job a Maybe even when the title says entry level.
+  let needsYears = false;
 
   if (TITLE_ENTRY.test(t)) {
     entry = true;
@@ -121,11 +163,14 @@ export function classify(title: string, description = ""): Classification {
     reasons.push(`title: ${t.match(TITLE_MAYBE)![0].trim()}`);
   }
 
-  for (const y of yearsMentions(description)) {
-    if (y.lo >= 3) {
+  for (const y of yearsMentions(required)) {
+    if (y.lo >= EXCLUDE_YEARS) {
       return { category, level: "excluded", reasons: [`${y.lo}+ years of experience required`] };
     }
-    if (y.hi !== null && y.hi >= 3) {
+    if (y.lo >= MAYBE_YEARS) {
+      needsYears = true;
+      reasons.push(`JD: ${y.lo}${y.hi !== null ? "-" + y.hi : "+"} years`);
+    } else if (y.hi !== null && y.hi >= MAYBE_YEARS) {
       maybe = true;
       reasons.push(`JD: ${y.lo}-${y.hi} years`);
     } else {
@@ -133,17 +178,19 @@ export function classify(title: string, description = ""): Classification {
       reasons.push(`JD: ${y.lo}${y.hi !== null ? "-" + y.hi : "+"} years`);
     }
   }
-  if (JD_NO_EXPERIENCE.test(description)) {
+  if (JD_NO_EXPERIENCE.test(required)) {
     entry = true;
     reasons.push("JD: no experience required");
   }
-  if (!entry && !maybe && JD_ENTRY_WORDS.test(description)) {
+  if (!entry && !maybe && !needsYears && JD_ENTRY_WORDS.test(description)) {
     entry = true;
     reasons.push("JD mentions new grads or early career");
   }
 
   // A JD range like "1-3 years" demotes an otherwise entry-level title.
-  let level: Level = maybe && !TITLE_ENTRY.test(t) ? "maybe" : entry ? "entry" : maybe ? "maybe" : "unknown";
+  let level: Level = needsYears
+    ? "maybe"
+    : maybe && !TITLE_ENTRY.test(t) ? "maybe" : entry ? "entry" : maybe ? "maybe" : "unknown";
   // A plain title whose description we read but that never says how much
   // experience it wants: worth a look, so it's a Maybe. Without a description
   // (title-only screening) it stays unknown so the description gets fetched.
