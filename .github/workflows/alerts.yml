@@ -1,5 +1,9 @@
 # Daily job alerts at 7 pm Chicago time.
 #
+# On time: a free Cloudflare Worker (src/cloudflare/trigger.ts) starts this
+# workflow at 7:02 pm with mode=scheduled. The GitHub crons below stay as a
+# fallback in case that trigger is not set up or its token expires.
+#
 # GitHub cron runs in UTC, ignores daylight saving, and often starts scheduled
 # runs hours late (worst at the top of the hour). So it is scheduled several times
 # a night, off the hour, and the "Due?" step lets exactly one run through per
@@ -36,9 +40,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "send = normal run, dry-run = print the email in the log only, test-email = check SMTP"
+        description: "send = normal run, dry-run = print the email in the log only, test-email = check SMTP, scheduled = like the nightly run (skips if today's email already went out)"
         type: choice
-        options: [send, dry-run, test-email]
+        options: [send, dry-run, test-email, scheduled]
         default: send
 
 permissions:
@@ -56,7 +60,11 @@ jobs:
       TZ: America/Chicago
       ALERT_HOUR: "19"
     steps:
+      # Check out the branch tip, not the commit that triggered the run, so a run
+      # that waited behind another one sees the "already sent" state it saved.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - name: Due?
         id: due
@@ -65,7 +73,7 @@ jobs:
           if [ "$hour" -ge "$ALERT_HOUR" ]; then slot=$(date +%F); else slot=$(date -d yesterday +%F); fi
           last=$(cat .data/alerts-last-run 2>/dev/null || true)
           echo "slot=$slot" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" != "scheduled" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           elif [ -z "$last" ] || [[ "$last" < "$slot" ]]; then
             echo "Running the $slot slot (Chicago time $(date '+%F %H:%M'))."
@@ -82,7 +90,7 @@ jobs:
 
       - name: Install
         if: steps.due.outputs.run == 'true'
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Prepare
         if: steps.due.outputs.run == 'true'
@@ -124,7 +132,7 @@ jobs:
           esac
 
       - name: Save what was sent
-        if: steps.due.outputs.run == 'true' && (inputs.mode == '' || inputs.mode == 'send')
+        if: steps.due.outputs.run == 'true' && (inputs.mode == '' || inputs.mode == 'send' || inputs.mode == 'scheduled')
         env:
           STATE_KEY: ${{ secrets.STATE_KEY }}
         run: |

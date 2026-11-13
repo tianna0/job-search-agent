@@ -29,7 +29,7 @@ const res = await fetch(`${url}/api/push-jobs`, {
   headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
   body: JSON.stringify({ jobs, lastDiscovery: state.lastDiscovery ?? {} }),
 });
-const body = await res.json().catch(() => ({}));
+const body = (await res.json().catch(() => ({}))) as { error?: string; jobs?: number };
 if (!res.ok) {
   console.error(`Push failed (HTTP ${res.status}): ${body.error ?? "unknown error"}`);
   process.exit(1);

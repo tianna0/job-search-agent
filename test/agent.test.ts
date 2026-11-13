@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import type { webcrypto } from "node:crypto";
 import { Tracker } from "../src/core/tracker.ts";
 import { emptyState, type TrackerState } from "../src/core/types.ts";
 import { runFollowUpSteps, type FollowUpAgentApi, type StepRunner } from "../src/core/followup-workflow.ts";
@@ -357,11 +358,11 @@ async function keyPair() {
     true,
     ["sign", "verify"]
   );
-  const jwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as JsonWebKey & { kid?: string };
+  const jwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as webcrypto.JsonWebKey & { kid?: string };
   return { pair, jwk: { ...jwk, kid: "k1", alg: "RS256", use: "sig" } };
 }
 
-async function sign(privateKey: CryptoKey, payload: Record<string, unknown>, kid = "k1") {
+async function sign(privateKey: webcrypto.CryptoKey, payload: Record<string, unknown>, kid = "k1") {
   const head = enc({ alg: "RS256", kid, typ: "JWT" });
   const body = enc(payload);
   const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", privateKey, new TextEncoder().encode(`${head}.${body}`));

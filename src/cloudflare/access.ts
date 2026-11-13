@@ -11,8 +11,16 @@ export interface AccessEnv {
   POLICY_AUD?: string; // the Access application's AUD tag
 }
 
-interface Jwk extends JsonWebKey {
+// The public-key fields this file reads from Access's JWKS endpoint. Declared here
+// instead of extending the DOM/Workers JsonWebKey type, so it compiles the same
+// under the Workers and the Node type definitions.
+interface Jwk {
   kid?: string;
+  kty: string;
+  n?: string;
+  e?: string;
+  alg?: string;
+  use?: string;
 }
 
 const KEY_CACHE_MS = 60 * 60 * 1000;
