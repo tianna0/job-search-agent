@@ -133,8 +133,9 @@ export function yearsMentions(text: string): YearsMention[] {
 }
 
 // Experience thresholds (years, the lower bound a JD asks for).
-const EXCLUDE_YEARS = 5; // 5+ years: not early career
-const MAYBE_YEARS = 3; // 3-4 years: worth a look
+// The target is 0-3 years of required experience.
+const EXCLUDE_YEARS = 4; // a 4+ year minimum is out of range
+const MAYBE_YEARS = 3; // exactly 3 years: in range, but at the top of it
 
 export function classify(title: string, description = ""): Classification {
   const reasons: string[] = [];
@@ -152,7 +153,7 @@ export function classify(title: string, description = ""): Classification {
 
   let entry = false;
   let maybe = false;
-  // A 3-4 year minimum makes a job a Maybe even when the title says entry level.
+  // A 3-year minimum makes a job a Maybe even when the title says entry level.
   let needsYears = false;
 
   if (TITLE_ENTRY.test(t)) {
@@ -170,7 +171,7 @@ export function classify(title: string, description = ""): Classification {
     if (y.lo >= MAYBE_YEARS) {
       needsYears = true;
       reasons.push(`JD: ${y.lo}${y.hi !== null ? "-" + y.hi : "+"} years`);
-    } else if (y.hi !== null && y.hi >= MAYBE_YEARS) {
+    } else if (y.hi !== null && y.hi >= EXCLUDE_YEARS) {
       maybe = true;
       reasons.push(`JD: ${y.lo}-${y.hi} years`);
     } else {

@@ -107,9 +107,10 @@ test("plain titles are decided by the job description", () => {
   assert.equal(classify("Software Engineer", "0-1 years of professional experience").level, "entry");
   assert.equal(classify("Software Engineer", "No prior experience required.").level, "entry");
   assert.equal(classify("Software Engineer", "2 years of experience building services").level, "entry");
-  assert.equal(classify("Software Engineer", "1-3 years of relevant experience").level, "maybe");
+  assert.equal(classify("Software Engineer", "1-3 years of relevant experience").level, "entry");
   assert.equal(classify("Software Engineer", "3+ years of experience required").level, "maybe");
-  assert.equal(classify("Software Engineer", "4+ years of experience required").level, "maybe");
+  assert.equal(classify("Software Engineer", "4+ years of experience required").level, "excluded");
+  assert.equal(classify("Software Engineer", "2-4 years of experience").level, "maybe");
   assert.equal(classify("Software Engineer", "5 years of industry experience").level, "excluded");
 });
 
@@ -122,9 +123,9 @@ test("a plain title whose JD doesn't state years is a Maybe", () => {
   assert.equal(classify("Senior Software Engineer", "Build APIs.").level, "excluded");
 });
 
-test("a 3-4 year requirement demotes an entry-level title; 5+ excludes it", () => {
-  assert.equal(classify("Software Engineer I", "Requires 4+ years of experience").level, "maybe");
-  assert.equal(classify("Software Engineer I", "Requires 5+ years of experience").level, "excluded");
+test("a 3 year requirement demotes an entry-level title; 4+ excludes it", () => {
+  assert.equal(classify("Software Engineer I", "Requires 3+ years of experience").level, "maybe");
+  assert.equal(classify("Software Engineer I", "Requires 4+ years of experience").level, "excluded");
 });
 
 test("years under preferred qualifications never exclude", () => {
@@ -170,6 +171,6 @@ test("equal-opportunity wording about citizenship status is not a requirement", 
 });
 
 test("a JD range demotes an entry title only when the title is not entry", () => {
-  assert.equal(classify("Software Engineer", "1-3 years of experience").level, "maybe");
-  assert.equal(classify("Software Engineer I", "1-3 years of experience").level, "entry");
+  assert.equal(classify("Software Engineer", "2-5 years of experience").level, "maybe");
+  assert.equal(classify("Software Engineer I", "2-5 years of experience").level, "entry");
 });
