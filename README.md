@@ -11,4 +11,15 @@ flowchart LR
   RK --> MAIL["Daily email"]
 ```
 
-**Stack:** TypeScript · Node · Cloudflare Workers AI · GitHub Actions · 102 tests
+**Stack:** TypeScript · Node · Cloudflare Workers AI · GitHub Actions · 114 tests
+
+## On-time emails
+
+GitHub often starts scheduled runs hours late. To get the email at 7 pm Chicago time, a small Cloudflare Worker (free plan) starts the workflow on time; the GitHub crons remain as a fallback.
+
+1. Create a [fine-grained GitHub token](https://github.com/settings/personal-access-tokens/new): repository access *Only select repositories* → this repo, permission *Actions: Read and write*.
+2. `npx wrangler login`
+3. `npx wrangler secret put GITHUB_TOKEN -c wrangler.trigger.jsonc` and paste the token.
+4. `npm run deploy:trigger`
+
+To check it, open the Worker's *Settings → Trigger Events* in the Cloudflare dashboard, or run the workflow by hand with mode `scheduled`.

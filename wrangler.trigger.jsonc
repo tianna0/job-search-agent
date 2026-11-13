@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Starts the GitHub "Job alerts" workflow on time (GitHub's own cron runs late).
+  // Free on the Workers Free plan. Deploy with: npm run deploy:trigger
+  "name": "job-alerts-trigger",
+  "main": "src/cloudflare/trigger.ts",
+  "compatibility_date": "2025-03-01",
+  "workers_dev": false,
+
+  // 7:02 pm Chicago in summer (00:02 UTC) and in winter (01:02 UTC). The workflow's
+  // "Due?" step lets only the first one that is at or after 7 pm through each day.
+  "triggers": { "crons": ["2 0 * * *", "2 1 * * *"] },
+
+  "vars": {
+    "GITHUB_REPO": "tianna0/job-search-agent",
+    "WORKFLOW_FILE": "alerts.yml",
+    "WORKFLOW_REF": "main"
+  },
+  // Secret, set once with:  npx wrangler secret put GITHUB_TOKEN -c wrangler.trigger.jsonc
+
+  "observability": { "enabled": true }
+}
