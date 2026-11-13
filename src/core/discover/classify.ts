@@ -3,6 +3,7 @@
 export type Category =
   | "QA/SDET"
   | "SRE/DevOps"
+  | "Platform/Infra"
   | "Full-stack"
   | "Frontend"
   | "Backend"
@@ -22,9 +23,12 @@ export interface Classification {
 const CATEGORY_RULES: [Category, RegExp][] = [
   [
     "QA/SDET",
-    /\bsdet\b|software (development )?engineer(s)? in test|software (quality|test) engineer|quality assurance engineer|\bqa engineer|test automation/i,
+    /\bsdet\b|software (development )?engineer(s)? in test|software (quality|test) engineer|quality assurance engineer|\bqa engineer|test automation|\btest engineer|\b(software|systems?|qa) validation engineer/i,
   ],
   ["SRE/DevOps", /site reliability engineer|\bsre\b|dev[\s-]?ops engineer|\bdevops\b/i],
+  // Platform and infrastructure roles, e.g. "Platform Engineer", "Infrastructure Engineer, Compute".
+  // "Member of Technical Staff" on its own is deliberately not a category.
+  ["Platform/Infra", /\bplatform engineer|\binfrastructure engineer|\bproduction engineer|\bcloud engineer/i],
   ["Full-stack", /full[\s-]?stack/i],
   ["Frontend", /front[\s-]?end|\bui software/i],
   ["Backend", /back[\s-]?end/i],
