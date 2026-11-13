@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { filterByLocation, pickNewJobs, renderEmail, updateSeen } from "../src/core/alerts.ts";
 import { plistXml, LABEL } from "../src/node/plist.ts";
 import type { DiscoveredJob } from "../src/core/discover/discover.ts";
+import { experienceExcerpt, requiredYears, classify } from "../src/core/discover/classify.ts";
+import { parseYears, reviewExperience } from "../src/core/experience.ts";
+import type { LLM } from "../src/core/types.ts";
 
 function job(id: string, extra: Partial<DiscoveredJob> = {}): DiscoveredJob {
   return {
@@ -274,4 +277,88 @@ test("email has a Salary column", () => {
   assert.match(email.html, /\$138k–\$192k/);
   assert.match(email.text, /Salary \$138k–\$192k/);
   assert.match(email.text, /Salary Not stated/);
+});
+
+// ---------- experience check ----------
+
+const JD = [
+  "About the team",
+  "We build things. Founded 10 years ago.",
+  "Minimum Qualifications:",
+  "BS in Computer Science or related field.",
+  "2+ years of experience with Python.",
+  "Preferred Qualifications:",
+  "6+ years of experience in distributed systems.",
+].join("\n");
+
+const fakeLlm = (replies: Record<string, string>, calls: string[] = []): LLM => ({
+  async complete(_system, user) {
+    calls.push(user);
+    const key = Object.keys(replies).find((k) => user.includes(k));
+    if (!key) throw new Error("unexpected call");
+    return replies[key];
+  },
+});
+
+test("experience excerpt keeps year lines under their headings", () => {
+  assert.equal(
+    experienceExcerpt(JD),
+    "[Minimum Qualifications:]\n- 2+ years of experience with Python.\n[Preferred Qualifications:]\n- 6+ years of experience in distributed systems."
+  );
+  assert.equal(experienceExcerpt("Build APIs in Go."), "");
+});
+
+test("required years by rule ignore the preferred section", () => {
+  assert.equal(requiredYears(JD), 2);
+  assert.equal(requiredYears("Build APIs."), undefined);
+});
+
+test("a higher rule threshold leaves 4-5 year jobs for a closer read", () => {
+  const jd = "Requirements:\n4+ years of experience building services.";
+  assert.equal(classify("Software Engineer", jd).level, "excluded");
+  assert.equal(classify("Software Engineer", jd, { excludeYears: 6 }).level, "maybe");
+  assert.equal(classify("Software Engineer", "7+ years of experience", { excludeYears: 6 }).level, "excluded");
+});
+
+test("parseYears reads the model's JSON", () => {
+  assert.equal(parseYears('{"years": 3}'), 3);
+  assert.equal(parseYears('Sure! {"years": null}'), null);
+  assert.equal(parseYears("about three"), undefined);
+  assert.equal(parseYears('{"years": "lots"}'), undefined);
+});
+
+test("the model's answer decides: up to 3 years kept, more dropped", async () => {
+  const calls: string[] = [];
+  const llm = fakeLlm({ "job-a": '{"years": 2}', "job-b": '{"years": 5}', "job-c": '{"years": null}' }, calls);
+  const jobs = [
+    job("a", { title: "job-a", experience: "- 2+ years", requiredYears: 5 }),
+    job("b", { title: "job-b", experience: "- 5+ years", requiredYears: 2 }),
+    job("c", { title: "job-c", experience: "- 4 years preferred" }),
+    job("d"), // no years mentioned: kept without a call
+  ];
+  const r = await reviewExperience(jobs, llm);
+  assert.deepEqual(r.kept.map((j) => j.id), ["a", "c", "d"]);
+  assert.deepEqual(r.dropped.map((j) => j.id), ["b"]);
+  assert.equal(r.checked, 3);
+  assert.equal(calls.length, 3);
+  assert.ok(r.kept[0].reasons.includes("AI: 2 years required"));
+  assert.ok(r.dropped[0].reasons.includes("AI: 5+ years required"));
+});
+
+test("without the model, the rule-based count decides", async () => {
+  const jobs = [
+    job("a", { experience: "- 4+ years", requiredYears: 4 }),
+    job("b", { experience: "- 3 years", requiredYears: 3 }),
+  ];
+  const none = await reviewExperience(jobs, null);
+  assert.deepEqual(none.kept.map((j) => j.id), ["b"]);
+  assert.deepEqual(none.dropped.map((j) => j.id), ["a"]);
+
+  // The first failed call stops further calls for the run.
+  let n = 0;
+  const failing: LLM = { async complete() { n++; throw new Error("quota"); } };
+  const r = await reviewExperience(jobs, failing);
+  assert.equal(n, 1);
+  assert.equal(r.error, "quota");
+  assert.deepEqual(r.dropped.map((j) => j.id), ["a"]);
 });

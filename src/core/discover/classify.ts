@@ -134,10 +134,53 @@ export function yearsMentions(text: string): YearsMention[] {
 
 // Experience thresholds (years, the lower bound a JD asks for).
 // The target is 0-3 years of required experience.
-const EXCLUDE_YEARS = 4; // a 4+ year minimum is out of range
+export const MAX_YEARS = 3;
+const EXCLUDE_YEARS = MAX_YEARS + 1; // a 4+ year minimum is out of range
 const MAYBE_YEARS = 3; // exactly 3 years: in range, but at the top of it
 
-export function classify(title: string, description = ""): Classification {
+/** The largest minimum the required part of a JD states, or undefined if it states none. */
+export function requiredYears(description: string): number | undefined {
+  const lows = yearsMentions(requiredText(description)).map((y) => y.lo);
+  return lows.length ? Math.max(...lows) : undefined;
+}
+
+/**
+ * The lines of a JD that mention years of experience, each under the heading it
+ * appears in, so a reader can tell required from preferred. Short enough to send
+ * to a model cheaply. Empty when the JD never mentions years.
+ */
+export function experienceExcerpt(description: string, maxChars = 1500): string {
+  const out: string[] = [];
+  let heading = "";
+  let lastHeading = "";
+  for (const line of description.split(/\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    if (t.length <= 80 && (PREFERRED_HEADING.test(t) || OTHER_HEADING.test(t) || /:$/.test(t))) {
+      heading = t;
+      continue;
+    }
+    if (!yearsMentions(t).length) continue;
+    if (heading && heading !== lastHeading) {
+      out.push(`[${heading}]`);
+      lastHeading = heading;
+    }
+    out.push(`- ${t.slice(0, 300)}`);
+  }
+  return out.join("\n").slice(0, maxChars);
+}
+
+export interface ClassifyOptions {
+  /**
+   * A required minimum of this many years or more excludes the job (default 4).
+   * Job alerts set it higher so only clear misses are dropped by rule and the
+   * rest get a closer read later.
+   */
+  excludeYears?: number;
+}
+
+export function classify(title: string, description = "", opts: ClassifyOptions = {}): Classification {
+  const excludeYears = opts.excludeYears ?? EXCLUDE_YEARS;
   const reasons: string[] = [];
   const category = categorize(title);
   const t = normalizeTitle(title);
@@ -165,13 +208,13 @@ export function classify(title: string, description = ""): Classification {
   }
 
   for (const y of yearsMentions(required)) {
-    if (y.lo >= EXCLUDE_YEARS) {
+    if (y.lo >= excludeYears) {
       return { category, level: "excluded", reasons: [`${y.lo}+ years of experience required`] };
     }
     if (y.lo >= MAYBE_YEARS) {
       needsYears = true;
       reasons.push(`JD: ${y.lo}${y.hi !== null ? "-" + y.hi : "+"} years`);
-    } else if (y.hi !== null && y.hi >= EXCLUDE_YEARS) {
+    } else if (y.hi !== null && y.hi > MAX_YEARS) {
       maybe = true;
       reasons.push(`JD: ${y.lo}-${y.hi} years`);
     } else {

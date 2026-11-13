@@ -1,4 +1,4 @@
-import { classify, type Category, type Classification } from "./classify.ts";
+import { classify, experienceExcerpt, requiredYears, type Category, type Classification } from "./classify.ts";
 import { Http } from "./http.ts";
 import { makeSource, type ListedJob } from "./sources.ts";
 import type { Company } from "./companies.ts";
@@ -23,6 +23,10 @@ export interface DiscoveredJob {
   postedAt?: string;
   /** Annual USD pay range stated in the description, if any. */
   salary?: Salary;
+  /** Lines of the description that mention years of experience, under their headings. */
+  experience?: string;
+  /** Largest required minimum years found by rule in the description, if any. */
+  requiredYears?: number;
 }
 
 export interface DiscoverResult {
@@ -42,6 +46,8 @@ export interface DiscoverOptions {
   now?: string;
   /** Keep each match's description text (up to 4,000 characters). */
   keepDescription?: boolean;
+  /** A required minimum of this many years or more excludes a job (see classify). */
+  excludeYears?: number;
   /** For tests. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -66,6 +72,7 @@ export async function discoverCompany(
   });
   const now = opts.now ?? new Date().toISOString();
   const maxDetails = opts.maxDetails ?? 60;
+  const copts = { excludeYears: opts.excludeYears };
 
   const listed = await source.list(http);
   const skipped = { notSwe: 0, excluded: 0, noSignal: 0 };
@@ -92,6 +99,13 @@ export async function discoverCompany(
         return salary ? { salary } : {};
       })(),
       ...(opts.keepDescription && text ? { description: text.slice(0, 4000) } : {}),
+      ...(() => {
+        // Also from the full text: the requirements are often past the first 4,000 characters.
+        if (!text) return {};
+        const experience = experienceExcerpt(text);
+        const years = requiredYears(text);
+        return { ...(experience ? { experience } : {}), ...(years !== undefined ? { requiredYears: years } : {}) };
+      })(),
     });
   };
   const tally = (c: Classification) => {
@@ -105,7 +119,7 @@ export async function discoverCompany(
 
   for (const j of listed) {
     if (j.description !== undefined) {
-      const c = classify(j.title, j.description);
+      const c = classify(j.title, j.description, copts);
       if (c.category && (c.level === "entry" || c.level === "maybe")) keep(j, c, undefined, j.description);
       else tally(c);
       continue;
@@ -143,7 +157,7 @@ export async function discoverCompany(
       }
       continue;
     }
-    const c = classify(job.title, desc);
+    const c = classify(job.title, desc, copts);
     if (c.category && (c.level === "entry" || c.level === "maybe")) keep(job, c, undefined, desc);
     else tally(c);
   }
